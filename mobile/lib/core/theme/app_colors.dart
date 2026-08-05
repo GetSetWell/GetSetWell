@@ -9,9 +9,8 @@ class AppColors {
   static const Color primary = Color(0xFFDAE64B);
 
   // Backgrounds
-  static const Color background = Color(0xFF000D1B);
-  static const Color surface = Color(0xFF0D1926);
-  static const Color surfaceSecondary = Color(0xFF1A2532);
+  static const Color surface = Color(0xFF000D1B);
+  static const Color surfaceSecondary = Color(0xFF0D1926);
 
   // Text
   static const Color textPrimary = Colors.white;
