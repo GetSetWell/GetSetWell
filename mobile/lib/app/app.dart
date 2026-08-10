@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../core/theme/app_theme.dart';
-import 'app_router.dart';
+import '../core/routing/gsw_router.dart';
+import '../core/theme/gsw_theme.dart';
 
 class GetSetWellApp extends StatelessWidget {
   const GetSetWellApp({super.key});
@@ -12,9 +12,9 @@ class GetSetWellApp extends StatelessWidget {
       title: 'GetSetWell',
       debugShowCheckedModeBanner: false,
 
-      theme: AppTheme.darkTheme,
+      theme: GSWTheme.darkTheme,
 
-      routerConfig: appRouter,
+      routerConfig: gswRouter,
     );
   }
 }

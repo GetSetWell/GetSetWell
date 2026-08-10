@@ -1,11 +1,9 @@
-// lib/core/theme/app_spacing.dart
+class GSWSizes {
+  GSWSizes._();
 
-class AppSpacing {
-  AppSpacing._();
-
-  static const double min = 4;
-  static const double xxs = 8;
-  static const double xs = 16;
+  static const double min = 10;
+  static const double xxs = 16;
+  static const double xs = 20;
   static const double sm = 24;
   static const double md = 32;
   static const double lg = 40;
