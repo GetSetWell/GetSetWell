@@ -292,7 +292,7 @@ class GSWButton extends StatelessWidget {
       return const BorderSide(color: GSWColors.primary, width: 2);
     }
 
-    return const BorderSide(color: GSWColors.borderPrimary, width: 1);
+    return const BorderSide(color: GSWColors.borderSecondary, width: 1);
   }
 
   // ===========================================================================

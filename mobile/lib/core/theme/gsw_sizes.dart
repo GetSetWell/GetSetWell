@@ -10,4 +10,7 @@ class GSWSizes {
   static const double xl = 48;
   static const double xxl = 64;
   static const double max = 80;
+  static const double splashLogo = 80;
+  static const double verifiedlogo = 24;
+  static const double icon = 16;
 }

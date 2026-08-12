@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app/app.dart';
+import 'core/config/supabase_config.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: 'https://tijezquislhgmfchbkyt.supabase.co',
-    publishableKey: 'sb_publishable_IoIiF6bHkE31U9qEVCZ1lg_ykCNYCwz',
-  );
+
+  await Supabase.initialize(url: SupabaseConfig.url, publishableKey: SupabaseConfig.publishableKey);
+
   runApp(const GetSetWellApp());
 }

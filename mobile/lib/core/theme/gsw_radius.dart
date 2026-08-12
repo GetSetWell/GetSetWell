@@ -1,4 +1,3 @@
-
 class GSWRadius {
   GSWRadius._();
 

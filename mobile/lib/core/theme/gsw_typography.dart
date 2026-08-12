@@ -143,6 +143,7 @@ class GSWTextStyles {
     fontSize: 14,
     fontWeight: FontWeight.w400,
     letterSpacing: 0,
+    height: 1.4,
   );
 
   static const TextStyle bodySmall = TextStyle(
@@ -150,6 +151,7 @@ class GSWTextStyles {
     fontSize: 12,
     fontWeight: FontWeight.w400,
     letterSpacing: 0,
+    height: 1.33,
   );
 
   static const TextStyle bodyExtraSmall = TextStyle(

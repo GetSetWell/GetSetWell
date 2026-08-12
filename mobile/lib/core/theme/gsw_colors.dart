@@ -46,6 +46,7 @@ class GSWColors {
   static const Color iconTertiary = Color(0xFF586169);
   static const Color iconDisabled = Color(0xFF2E3944);
   static const Color iconAccent = Color(0xFFDAE64B);
+  static const Color iconInverse = Color(0xFF000D1B);
   static const Color iconSuccess = Color(0xFF37D67A);
   static const Color iconWarning = Color(0xFFFBBF24);
   static const Color iconError = Color(0xFFF26D6D);
@@ -56,4 +57,7 @@ class GSWColors {
   static const Color warning = Color(0xFFFBBF24);
   static const Color error = Color(0xFFf26d6d);
   static const Color info = Color(0xFF3B82F6);
+
+  // Neutral
+  static const Color neutral400 = Color(0xFF6D747C);
 }

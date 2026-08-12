@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../../core/constants/gsw_constants.dart';
 import '../../../../core/constants/gsw_icons.dart';
 import '../../../../core/theme/gsw_radius.dart';
+import '../../../../core/theme/gsw_sizes.dart';
 import '../../../../core/theme/gsw_spacing.dart';
 
 class VerifiedTrainerBadge extends StatelessWidget {
