@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_radius.dart';
-import 'package:mobile/core/theme/gsw_sizes.dart';
+import 'package:mobile/features/trainers/domain/models/trainer_verification_check.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_language_pill.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_verification_row.dart';
+import 'package:mobile/features/trainers/presentation/widgets/trainer_verification_sheet.dart';
+
+import 'trainer_summary.dart';
 
 class TrainerCard extends StatelessWidget {
   const TrainerCard({
@@ -16,6 +17,8 @@ class TrainerCard extends StatelessWidget {
     required this.price,
     required this.languages,
     this.imageUrl,
+    required this.verificationChecks,
+    required this.onTap,
   });
 
   final String name;
@@ -24,122 +27,58 @@ class TrainerCard extends StatelessWidget {
   final double price;
   final List<String> languages;
   final String? imageUrl;
+  final List<TrainerVerificationCheck> verificationChecks;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: GSWColors.backgroundSecondary,
-        borderRadius: BorderRadius.circular(GSWRadius.md),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Trainer image
-          _buildTrainerImage(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildNameAndPrice(context),
-
-                const SizedBox(height: 12),
-
-                _buildLocation(context),
-
-                const SizedBox(height: 12),
-
-                const TrainerVerificationRow(),
-
-                const SizedBox(height: 12),
-
-                _buildLanguages(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNameAndPrice(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.headlineLarge?.copyWith(color: GSWColors.textPrimary),
-              ),
-
-              const SizedBox(height: 4),
-
-              Text(
-                service,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: GSWColors.textPrimary),
-              ),
-            ],
-          ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: GSWColors.backgroundSecondary,
+          borderRadius: BorderRadius.circular(GSWRadius.md),
+          border: Border.all(color: GSWColors.borderSecondary),
         ),
-
-        const SizedBox(width: 16),
-
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'AED ${price.toInt()}',
-              style: Theme.of(context).textTheme.headlineLarge?.copyWith(color: GSWColors.primary),
-            ),
+            // Trainer image
+            _buildTrainerImage(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TrainerNameAndPrice(name: name, service: service, price: price),
 
-            Text(
-              '/session',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
+                  const SizedBox(height: 12),
+
+                  TrainerLocation(location: location),
+
+                  const SizedBox(height: 12),
+
+                  TrainerVerificationRow(
+                    onTap: () {
+                      TrainerVerificationSheet.show(
+                        context,
+                        trainerName: name,
+                        items: verificationChecks,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  _buildLanguages(),
+                ],
+              ),
             ),
           ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildLocation(BuildContext context) {
-    return Row(
-      children: [
-        SvgPicture.asset(
-          GSWIcons.location,
-          width: GSWSizes.icon,
-          height: GSWSizes.icon,
-          colorFilter: const ColorFilter.mode(GSWColors.iconSecondary, BlendMode.srcIn),
-        ),
-
-        const SizedBox(width: 8),
-
-        Expanded(
-          child: Text(
-            location,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
-          ),
-        ),
-      ],
+      ),
     );
   }
 

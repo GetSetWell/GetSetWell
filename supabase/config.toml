@@ -124,6 +124,7 @@ allowed_mime_types = [
   "image/png",
   "image/webp"
 ]
+objects_path = "./trainer-images"
 
 # Uncomment to configure local storage buckets
 # [storage.buckets.images]

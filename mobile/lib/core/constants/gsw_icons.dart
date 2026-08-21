@@ -10,4 +10,18 @@ class GSWIcons {
   static const String nutrition = 'assets/icons/nutrition.svg';
   static const String recovery = 'assets/icons/recovery.svg';
   static const String arrowheadDown = 'assets/icons/arrowhead_down.svg';
+  static const String arrowheadLeft = 'assets/icons/arrowhead_left.svg';
+  static const String arrowheadUp = 'assets/icons/arrowhead_up.svg';
+  static const String arrowheadRight = 'assets/icons/arrowhead_right.svg';
+  static const String mobility = 'assets/icons/mobility.svg';
+  static const String prePostNatal = 'assets/icons/pre_post_natal.svg';
+  static const String coreStrength = 'assets/icons/core_strength.svg';
+  static const String filter = 'assets/icons/filter.svg';
+  static const String invisible = 'assets/icons/invisible.svg';
+  static const String clock = 'assets/icons/time.svg';
+  static const String calendar = 'assets/icons/calender.svg';
+  static const String cash = 'assets/icons/cash.svg';
+  static const String close = 'assets/icons/close.svg';
+  static const String edit = 'assets/icons/edit.svg';
+  static const String check = 'assets/icons/check.svg';
 }

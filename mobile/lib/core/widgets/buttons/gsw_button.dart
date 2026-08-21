@@ -4,7 +4,7 @@ import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_sizes.dart';
 import 'package:mobile/core/theme/gsw_spacing.dart';
 
-enum GSWButtonVariant { primary, secondary, tertiary }
+enum GSWButtonVariant { primary, secondary, tertiary, disabled }
 
 enum GSWButtonSize { large, medium }
 
@@ -36,8 +36,7 @@ class GSWButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool disabled = onPressed == null || isLoading;
-
+    final bool disabled = variant == GSWButtonVariant.disabled || onPressed == null || isLoading;
     final Color iconColor = disabled ? GSWColors.textTertiary : _defaultIconColor;
 
     return SizedBox(
@@ -111,7 +110,55 @@ class GSWButton extends StatelessWidget {
       ),
     );
   }
+Color _backgroundColor(Set<WidgetState> states) {
+  if (variant == GSWButtonVariant.disabled) {
+    return GSWColors.surfacePrimary;
+  }
 
+  if (states.contains(WidgetState.disabled)) {
+    switch (variant) {
+      case GSWButtonVariant.primary:
+      case GSWButtonVariant.secondary:
+        return GSWColors.surfaceElevated;
+
+      case GSWButtonVariant.tertiary:
+        return Colors.transparent;
+
+      case GSWButtonVariant.disabled:
+        return GSWColors.surfacePrimary;
+    }
+  }
+
+  switch (variant) {
+    case GSWButtonVariant.primary:
+      if (states.contains(WidgetState.pressed)) {
+        return GSWColors.primary.withValues(alpha: 0.85);
+      }
+
+      if (states.contains(WidgetState.hovered)) {
+        return GSWColors.primary.withValues(alpha: 0.92);
+      }
+
+      return GSWColors.primary;
+
+    case GSWButtonVariant.secondary:
+      if (states.contains(WidgetState.pressed)) {
+        return GSWColors.surfaceInteractive.withValues(alpha: 0.75);
+      }
+
+      if (states.contains(WidgetState.hovered)) {
+        return GSWColors.surfaceInteractive.withValues(alpha: 0.9);
+      }
+
+      return GSWColors.surfaceInteractive;
+
+    case GSWButtonVariant.tertiary:
+      return Colors.transparent;
+
+    case GSWButtonVariant.disabled:
+      return GSWColors.surfacePrimary;
+  }
+}
   // ===========================================================================
   // TYPOGRAPHY
   // ===========================================================================
@@ -173,38 +220,41 @@ class GSWButton extends StatelessWidget {
   // ===========================================================================
   // DEFAULT CONTENT COLOR
   // ===========================================================================
+Color get _defaultContentColor {
+  switch (variant) {
+    case GSWButtonVariant.primary:
+      return GSWColors.textInverse;
 
-  Color get _defaultContentColor {
-    switch (variant) {
-      case GSWButtonVariant.primary:
-        // PRIMARY BUTTON TEXT = #000D1B
-        return GSWColors.textInverse;
+    case GSWButtonVariant.secondary:
+      return GSWColors.textPrimary;
 
-      case GSWButtonVariant.secondary:
-        return GSWColors.textPrimary; // PRIMARY TEXT = white
+    case GSWButtonVariant.tertiary:
+      return GSWColors.primary;
 
-      case GSWButtonVariant.tertiary:
-        return GSWColors.primary; // PRIMARY TEXT = #DAE64B
-    }
+    case GSWButtonVariant.disabled:
+      return GSWColors.textTertiary;
   }
+}
 
   // ===========================================================================
   // DEFAULT ICON COLOR
   // ===========================================================================
 
-  Color get _defaultIconColor {
-    switch (variant) {
-      case GSWButtonVariant.primary:
-        // PRIMARY BUTTON TEXT = #000D1B
-        return GSWColors.textInverse;
+Color get _defaultIconColor {
+  switch (variant) {
+    case GSWButtonVariant.primary:
+      return GSWColors.textInverse;
 
-      case GSWButtonVariant.secondary:
-        return GSWColors.primary; // PRIMARY TEXT = #DAE64B
+    case GSWButtonVariant.secondary:
+      return GSWColors.primary;
 
-      case GSWButtonVariant.tertiary:
-        return GSWColors.primary; // PRIMARY TEXT = #DAE64B
-    }
+    case GSWButtonVariant.tertiary:
+      return GSWColors.primary;
+
+    case GSWButtonVariant.disabled:
+      return GSWColors.textTertiary;
   }
+}
 
   // ===========================================================================
   // TEXT COLOR
@@ -219,108 +269,70 @@ class GSWButton extends StatelessWidget {
   }
 
   // ===========================================================================
-  // BACKGROUND
-  // ===========================================================================
-
-  Color _backgroundColor(Set<WidgetState> states) {
-    if (states.contains(WidgetState.disabled)) {
-      switch (variant) {
-        case GSWButtonVariant.primary:
-        case GSWButtonVariant.secondary:
-          return GSWColors.surfaceElevated;
-
-        case GSWButtonVariant.tertiary:
-          return Colors.transparent;
-      }
-    }
-
-    switch (variant) {
-      // -----------------------------------------------------------------------
-      // PRIMARY
-      // -----------------------------------------------------------------------
-
-      case GSWButtonVariant.primary:
-        if (states.contains(WidgetState.pressed)) {
-          return GSWColors.primary.withValues(alpha: 0.85);
-        }
-
-        if (states.contains(WidgetState.hovered)) {
-          return GSWColors.primary.withValues(alpha: 0.92);
-        }
-
-        return GSWColors.primary;
-
-      // -----------------------------------------------------------------------
-      // SECONDARY
-      // -----------------------------------------------------------------------
-
-      case GSWButtonVariant.secondary:
-        if (states.contains(WidgetState.pressed)) {
-          return GSWColors.surfaceInteractive.withValues(alpha: 0.75);
-        }
-
-        if (states.contains(WidgetState.hovered)) {
-          return GSWColors.surfaceInteractive.withValues(alpha: 0.9);
-        }
-
-        return GSWColors.surfaceInteractive;
-
-      // -----------------------------------------------------------------------
-      // TERTIARY
-      // -----------------------------------------------------------------------
-
-      case GSWButtonVariant.tertiary:
-        return Colors.transparent;
-    }
-  }
-
-  // ===========================================================================
   // BORDER
   // ===========================================================================
 
   BorderSide _border(Set<WidgetState> states) {
-    // Primary and tertiary have no border
-    if (variant != GSWButtonVariant.secondary) {
-      return BorderSide.none;
-    }
-
-    if (states.contains(WidgetState.disabled)) {
-      return const BorderSide(color: GSWColors.textTertiary, width: 1);
-    }
-
-    if (states.contains(WidgetState.focused)) {
-      return const BorderSide(color: GSWColors.primary, width: 2);
-    }
-
-    return const BorderSide(color: GSWColors.borderSecondary, width: 1);
+  if (variant == GSWButtonVariant.disabled) {
+    return const BorderSide(
+      color: GSWColors.borderDisabled,
+      width: 1,
+    );
   }
 
+  if (variant != GSWButtonVariant.secondary) {
+    return BorderSide.none;
+  }
+
+  if (states.contains(WidgetState.disabled)) {
+    return const BorderSide(
+      color: GSWColors.borderDisabled,
+      width: 1,
+    );
+  }
+
+  if (states.contains(WidgetState.focused)) {
+    return const BorderSide(
+      color: GSWColors.primary,
+      width: 2,
+    );
+  }
+
+  return const BorderSide(
+    color: GSWColors.borderSecondary,
+    width: 1,
+  );
+}
   // ===========================================================================
   // PRESSED / HOVER OVERLAY
   // ===========================================================================
 
   Color? _overlayColor(Set<WidgetState> states) {
-    if (states.contains(WidgetState.disabled)) {
-      return Colors.transparent;
-    }
-
-    if (states.contains(WidgetState.pressed)) {
-      switch (variant) {
-        case GSWButtonVariant.primary:
-          return GSWColors.surfaceElevated.withValues(alpha: 0.08);
-
-        case GSWButtonVariant.secondary:
-        case GSWButtonVariant.tertiary:
-          return GSWColors.primary.withValues(alpha: 0.08);
-      }
-    }
-
-    if (states.contains(WidgetState.hovered)) {
-      return GSWColors.primary.withValues(alpha: 0.04);
-    }
-
+  if (variant == GSWButtonVariant.disabled ||
+      states.contains(WidgetState.disabled)) {
     return Colors.transparent;
   }
+
+  if (states.contains(WidgetState.pressed)) {
+    switch (variant) {
+      case GSWButtonVariant.primary:
+        return GSWColors.surfaceElevated.withValues(alpha: 0.08);
+
+      case GSWButtonVariant.secondary:
+      case GSWButtonVariant.tertiary:
+        return GSWColors.primary.withValues(alpha: 0.08);
+
+      case GSWButtonVariant.disabled:
+        return Colors.transparent;
+    }
+  }
+
+  if (states.contains(WidgetState.hovered)) {
+    return GSWColors.primary.withValues(alpha: 0.04);
+  }
+
+  return Colors.transparent;
+}
 }
 
 // =============================================================================

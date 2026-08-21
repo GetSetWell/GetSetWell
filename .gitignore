@@ -8,3 +8,8 @@
 # Environment
 .env
 .env.*
+# Supabase local temporary files
+supabase/.temp/
+
+# Supabase local temporary files
+supabase/.temp/

@@ -3,4 +3,7 @@ class GSWRoutes {
 
   static const splash = '/';
   static const onboarding = '/onboarding';
+  static const trainer = '/trainers';
+  static const trainerProfile = '/trainer-profile';
+  static const bookingRequest = '/booking-request';
 }

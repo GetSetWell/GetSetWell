@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:mobile/core/widgets/common/header.dart';
@@ -95,12 +97,6 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
                 _buildTrainerList(),
 
                 const SizedBox(height: 24),
-
-                TrainerMatchingCard(
-                  onTap: () {
-                    // Booking/matching flow will be connected later.
-                  },
-                ),
               ],
             ),
           ),
@@ -264,31 +260,79 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
         final trainers = snapshot.data ?? [];
 
-        if (trainers.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Text(
-              'No trainers available.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
-            ),
+        final filteredTrainers = trainers.where((trainer) {
+          // Female-only filter
+          if (_showFemaleOnly && trainer.gender != 'female') {
+            return false;
+          }
+
+          // Service filter
+          if (_selectedCategory != 'All' && trainer.primaryService != _selectedCategory) {
+            return false;
+          }
+
+          return true;
+        }).toList();
+
+        if (filteredTrainers.isEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+
+              Center(
+                child: Text(
+                  'No trainers match these filters.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              TrainerMatchingCard(
+                onTap: () {
+                  // Connect to concierge matching flow later.
+                },
+              ),
+            ],
           );
         }
 
         return Column(
           children: [
-            for (int index = 0; index < trainers.length; index++) ...[
-              TrainerCard(
-                name: trainers[index].fullName,
-                service: trainers[index].primaryService ?? 'Personal Training',
-                location: trainers[index].serviceArea ?? 'Dubai',
-                price: trainers[index].pricePerSession ?? 0,
-                languages: trainers[index].languages,
-                imageUrl: trainers[index].profileImageUrl,
-              ),
+            for (int index = 0; index < filteredTrainers.length; index++) ...[
+              Builder(
+                builder: (context) {
+                  final trainer = filteredTrainers[index];
 
-              if (index != trainers.length - 1) const SizedBox(height: 24),
+                  return TrainerCard(
+                    name: trainer.fullName,
+                    service: trainer.primaryService ?? 'Personal Training',
+                    location: trainer.serviceArea ?? 'Dubai',
+                    price: trainer.pricePerSession ?? 0,
+                    languages: trainer.languages,
+                    imageUrl: trainer.profileImageUrl,
+                    verificationChecks: trainer.verificationChecks,
+                    onTap: () {
+                      context.push(GSWRoutes.trainerProfile, extra: trainer);
+                    },
+                  );
+                },
+              ),
+              if (index == 0) ...[
+                const SizedBox(height: 24),
+
+                TrainerMatchingCard(
+                  onTap: () {
+                    // We’ll connect this to the concierge
+                    // request flow next.
+                  },
+                ),
+              ],
+              if (index != filteredTrainers.length - 1) const SizedBox(height: 24),
             ],
           ],
         );

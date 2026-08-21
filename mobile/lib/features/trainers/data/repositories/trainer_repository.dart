@@ -16,12 +16,18 @@ class TrainerRepository {
         slug,
         gender,
         credentials,
+        bio,
         years_experience,
         price_per_session,
         profile_image_url,
         service_area,
         languages,
         availability_note,
+        session_duration_minutes,
+        session_format,
+        session_locations,
+        session_schedule_note,
+        payment_note,
         is_verified,
         display_order,
         trainer_services (
@@ -29,6 +35,25 @@ class TrainerRepository {
           services (
             name
           )
+        ),
+        trainer_verification_checks (
+          id,
+          title,
+          description,
+          check_type,
+          display_order,
+          is_verified
+        ),
+        trainer_specialties (
+          specialties (
+          name,
+          slug
+          )
+        ),
+        trainer_fit_points (
+          id,
+          text,
+          display_order
         )
         ''')
         .order('display_order', ascending: true);
