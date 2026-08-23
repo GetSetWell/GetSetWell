@@ -658,3 +658,62 @@ set
   session_schedule_note = 'Weekday evenings and weekends',
   payment_note = 'Paid directly to Rajesh, no fee from us'
 where slug = 'rajesh-pradhan';
+
+-- ============================================================
+-- TRAINING LOCATIONS
+-- Structured matching/filtering data.
+-- Do not use this for profile copy.
+-- ============================================================
+
+insert into public.training_locations (
+  name,
+  slug,
+  location_type,
+  is_partner,
+  is_active
+)
+values
+  ('Home', 'home', 'home', false, true),
+  ('Gym', 'gym', 'gym', false, true),
+  ('Outdoors', 'outdoors', 'outdoor', false, true)
+on conflict (slug) do update
+set
+  name = excluded.name,
+  location_type = excluded.location_type,
+  is_partner = excluded.is_partner,
+  is_active = excluded.is_active;
+
+  -- ============================================================
+-- TRAINER ↔ TRAINING LOCATIONS
+-- ============================================================
+
+insert into public.trainer_training_locations (
+  trainer_id,
+  training_location_id,
+  display_order
+)
+select
+  t.id,
+  tl.id,
+  location_data.display_order
+from public.trainers t
+cross join (
+  values
+    ('home', 1),
+    ('gym', 2),
+    ('outdoors', 3)
+) as location_data(slug, display_order)
+join public.training_locations tl
+  on tl.slug = location_data.slug
+where t.full_name in (
+  'Michelle Berowsky',
+  'Atabey',
+  'Arash Vahedi',
+  'Rajesh Pradhan'
+)
+on conflict (
+  trainer_id,
+  training_location_id
+)
+do update
+set display_order = excluded.display_order;

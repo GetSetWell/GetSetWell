@@ -7,7 +7,12 @@ import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
+import 'package:mobile/features/booking/domain/models/trainer_request_payload.dart';
+import 'package:mobile/features/booking/domain/validators/uae_phone_validator.dart';
+import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
+import 'package:mobile/features/trainers/domain/models/training_location.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class BookingRequestScreen extends StatefulWidget {
   const BookingRequestScreen({super.key, required this.trainer});
@@ -22,7 +27,12 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   // All booking-request state belongs inside this State class.
   String? _selectedGoal;
   int _currentStep = 1;
-  String? _selectedLocation;
+  TrainingLocation? _selectedLocation;
+
+  List<TrainingLocation> _availableTrainingLocations = [];
+
+  late final TrainerRepository _trainerRepository;
+
   String? _selectedTime;
   final Set<String> _selectedDays = {};
 
@@ -31,7 +41,18 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   final TextEditingController _whatsAppController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
-  bool _shareDetailsConsent = true;
+  bool _shareDetailsConsent = false;
+  bool _showPhoneError = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _trainerRepository = TrainerRepository(Supabase.instance.client);
+
+    _loadTrainerTrainingLocations();
+  }
+
   @override
   void dispose() {
     _preferredAreaController.dispose();
@@ -39,6 +60,85 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
     _whatsAppController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  TrainerRequestPayload _buildRequestPayload() {
+    return TrainerRequestPayload(
+      trainerId: widget.trainer.id,
+
+      customerName: _nameController.text,
+
+      phone: UAEPhoneValidator.toE164(_whatsAppController.text),
+
+      goal: _selectedGoal!,
+
+      preferredDays: _selectedDays.map((day) => day.toLowerCase()).toList(),
+
+      preferredTime: _selectedTime!.toLowerCase(),
+
+      trainingLocationId: _selectedLocation!.id,
+
+      preferredArea: _preferredAreaController.text,
+
+      message: _notesController.text,
+
+      shareDetailsConsent: _shareDetailsConsent,
+    );
+  }
+
+  Future<void> _loadTrainerTrainingLocations() async {
+    try {
+      final locations = await _trainerRepository.getTrainerTrainingLocations(widget.trainer.id);
+
+      if (!mounted) return;
+
+      setState(() {
+        _availableTrainingLocations = locations;
+      });
+    } catch (error) {
+      debugPrint('Failed to load trainer training locations: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _availableTrainingLocations = [];
+      });
+    }
+  }
+
+  Widget _buildTrainingLocationOptions() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _availableTrainingLocations.map((location) {
+        final isSelected = _selectedLocation?.id == location.id;
+
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedLocation = location;
+            });
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(100),
+              border: Border.all(
+                color: isSelected ? GSWColors.borderFocused : GSWColors.borderSecondary,
+              ),
+            ),
+            child: Text(
+              location.name,
+              style: GSWTextStyles.labelLarge.copyWith(
+                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
   }
 
   @override
@@ -258,8 +358,6 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     const times = ['Morning', 'Afternoon', 'Evening'];
 
-    const locations = ['Home', 'Gym', 'Outdoors'];
-
     return SingleChildScrollView(
       physics: const ClampingScrollPhysics(),
       child: Column(
@@ -349,22 +447,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
           const SizedBox(height: 8),
 
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final location in locations)
-                _buildCompactOption(
-                  label: location,
-                  isSelected: _selectedLocation == location,
-                  onTap: () {
-                    setState(() {
-                      _selectedLocation = location;
-                    });
-                  },
-                ),
-            ],
-          ),
+          _buildTrainingLocationOptions(),
 
           const SizedBox(height: 24),
 
@@ -568,7 +651,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
                       Expanded(
                         child: _buildRequestSummaryItem(
                           label: 'Where',
-                          value: _selectedLocation ?? '',
+                          value: _selectedLocation?.name ?? '',
                         ),
                       ),
                     ],
@@ -655,8 +738,21 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
                     hintText: '50 123 4567',
                     keyboardType: TextInputType.phone,
                     textInputAction: TextInputAction.next,
+                    errorText:
+                        _showPhoneError && !UAEPhoneValidator.isValid(_whatsAppController.text)
+                        ? 'Enter a valid UAE mobile number'
+                        : null,
                     onChanged: (_) {
-                      setState(() {});
+                      setState(() {
+                        if (_showPhoneError) {
+                          _showPhoneError = !UAEPhoneValidator.isValid(_whatsAppController.text);
+                        }
+                      });
+                    },
+                    onComplete: (_) {
+                      setState(() {
+                        _showPhoneError = !UAEPhoneValidator.isValid(_whatsAppController.text);
+                      });
                     },
                   ),
                 ),
@@ -733,7 +829,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     final stepThreeComplete =
         _nameController.text.trim().isNotEmpty &&
-        _whatsAppController.text.trim().isNotEmpty &&
+        UAEPhoneValidator.isValid(_whatsAppController.text) &&
         _shareDetailsConsent;
 
     final canContinue = switch (_currentStep) {
@@ -777,7 +873,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
                     Expanded(
                       child: Text(
-                        'I agree to share my details with '
+                        'I agree to share my details with GetSetWell and '
                         '$trainerFirstName so they can respond to my request.',
                         style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                       ),
@@ -823,7 +919,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
                           return;
                         }
 
-                        // Supabase submission comes next.
+                        _submitRequest();
                       },
               ),
 
@@ -845,5 +941,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
         ),
       ),
     );
+  }
+
+  void _submitRequest() {
+    final payload = _buildRequestPayload();
+
+    debugPrint('Trainer request payload: ${payload.toJson()}');
   }
 }

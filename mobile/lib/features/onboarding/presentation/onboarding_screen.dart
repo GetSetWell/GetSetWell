@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_spacing.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
@@ -52,7 +53,9 @@ class OnboardingScreen extends StatelessWidget {
                       variant: GSWButtonVariant.secondary,
                       label: 'Help me choose',
                       trailingIcon: GSWIcons.helpChoose,
-                      onPressed: () {},
+                      onPressed: () {
+                        context.push(GSWRoutes.helpMeChoose);
+                      },
                     ),
                     // Footer
                     const SizedBox(height: GSWSpacing.md),

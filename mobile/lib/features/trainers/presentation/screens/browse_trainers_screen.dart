@@ -294,7 +294,7 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
               TrainerMatchingCard(
                 onTap: () {
-                  // Connect to concierge matching flow later.
+                  context.push(GSWRoutes.helpMeChoose);
                 },
               ),
             ],
@@ -327,8 +327,7 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
                 TrainerMatchingCard(
                   onTap: () {
-                    // We’ll connect this to the concierge
-                    // request flow next.
+                    context.push(GSWRoutes.helpMeChoose);
                   },
                 ),
               ],

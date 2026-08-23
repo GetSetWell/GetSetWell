@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 
 import '../../features/booking/presentation/screens/booking_request_screen.dart';
+import '../../features/booking/presentation/screens/help_me_choose_screen.dart';
 import '../../features/onboarding/presentation/onboarding_screen.dart';
 import '../../features/splash/presentation/splash_screen.dart';
 import '../../features/trainers/domain/models/trainer.dart';
@@ -31,6 +32,13 @@ final GoRouter gswRouter = GoRouter(
         final trainer = state.extra as Trainer;
 
         return BookingRequestScreen(trainer: trainer);
+      },
+    ),
+
+    GoRoute(
+      path: GSWRoutes.helpMeChoose,
+      builder: (context, state) {
+        return const HelpMeChooseScreen();
       },
     ),
   ],
