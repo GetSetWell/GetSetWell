@@ -13,3 +13,6 @@ supabase/.temp/
 
 # Supabase local temporary files
 supabase/.temp/
+
+# Supabase Edge Function local secrets
+supabase/functions/.env.local

@@ -24,4 +24,6 @@ class GSWIcons {
   static const String close = 'assets/icons/close.svg';
   static const String edit = 'assets/icons/edit.svg';
   static const String check = 'assets/icons/check.svg';
+  static const String chatCheck = 'assets/icons/chat_check.svg';
+  static const String whatsapp = 'assets/icons/whatsapp.svg';
 }

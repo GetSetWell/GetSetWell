@@ -7,4 +7,5 @@ class GSWRoutes {
   static const trainerProfile = '/trainer-profile';
   static const bookingRequest = '/booking-request';
   static const helpMeChoose = '/help-me-choose';
+  static const bookingSuccess = '/booking-success';
 }

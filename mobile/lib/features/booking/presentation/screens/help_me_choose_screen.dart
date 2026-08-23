@@ -7,11 +7,16 @@ import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
+import 'package:mobile/features/booking/data/services/booking_request_service.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
 import 'package:mobile/features/booking/domain/validators/uae_phone_validator.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/training_location.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:go_router/go_router.dart';
+
+import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 
 class HelpMeChooseScreen extends StatefulWidget {
   const HelpMeChooseScreen({super.key});
@@ -30,6 +35,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   List<TrainingLocation> _availableTrainingLocations = [];
 
   late final TrainerRepository _trainerRepository;
+  late final BookingRequestService _bookingRequestService;
+
+  bool _isSubmitting = false;
 
   String? _selectedTime;
   TrainingLocation? _selectedLocation;
@@ -79,6 +87,8 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     super.initState();
 
     _trainerRepository = TrainerRepository(Supabase.instance.client);
+
+    _bookingRequestService = BookingRequestService(Supabase.instance.client);
 
     _loadMatchingOptions();
   }
@@ -987,13 +997,76 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     );
   }
 
-  void _submitRequest() {
+  Future<void> _submitRequest() async {
+    if (_isSubmitting) return;
+
     final payload = _buildRequestPayload();
 
-    debugPrint('Help me choose payload: ${payload.toJson()}');
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final result = await _bookingRequestService.submitConciergeMatch(payload);
+
+      if (!mounted) return;
+
+      if (!mounted) return;
+
+context.go(
+  GSWRoutes.bookingSuccess,
+  extra: ConciergeMatchSuccessData(
+    requestId: result.requestId,
+    referenceCode: result.referenceCode,
+    goal: _summaryGoalLabel(_selectedGoal),
+    days: _selectedDays
+        .map((day) => day.substring(0, 3))
+        .join(', '),
+    time: _selectedTime ?? '',
+    trainingLocation: _selectedLocation?.name ?? '',
+    preferredArea: _preferredAreaController.text.trim(),
+    trainerPreference:
+        _selectedTrainerPreference == null ||
+                _selectedTrainerPreference == 'No preference'
+            ? null
+            : _selectedTrainerPreference,
+    budget:
+        _selectedBudget == null ||
+                _selectedBudget == 'No preference'
+            ? null
+            : _selectedBudget,
+    language:
+        _selectedLanguage == null ||
+                _selectedLanguage == 'No preference'
+            ? null
+            : _selectedLanguage,
+  ),
+);
+
+      // Success screen comes next.
+    } on BookingRequestException catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (error) {
+      debugPrint('Unexpected booking request error: $error');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('We could not send your request. Please try again.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 
   Widget _buildBottomActions() {
+    final canPressButton = _currentStep == 4 ? _canContinue && !_isSubmitting : _canContinue;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -1046,10 +1119,10 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
           const SizedBox(height: 8),
 
           GSWButton(
-            variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+            variant: canPressButton ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
             size: GSWButtonSize.medium,
-            label: _currentStep == 4 ? 'Send Request' : 'Continue',
-            onPressed: !_canContinue
+            label: _currentStep == 4 ? (_isSubmitting ? 'Sending...' : 'Send Request') : 'Continue',
+            onPressed: !canPressButton
                 ? null
                 : _currentStep == 4
                 ? _submitRequest

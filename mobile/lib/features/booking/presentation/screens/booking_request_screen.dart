@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
+import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
+import 'package:mobile/features/booking/data/services/booking_request_service.dart';
+import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 import 'package:mobile/features/booking/domain/models/trainer_request_payload.dart';
 import 'package:mobile/features/booking/domain/validators/uae_phone_validator.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
@@ -28,10 +32,35 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   String? _selectedGoal;
   int _currentStep = 1;
   TrainingLocation? _selectedLocation;
+  String _formattedSelectedDays() {
+    return _selectedDays
+        .map((day) {
+          switch (day) {
+            case 'Monday':
+              return 'Mon';
+            case 'Tuesday':
+              return 'Tue';
+            case 'Wednesday':
+              return 'Wed';
+            case 'Thursday':
+              return 'Thu';
+            case 'Friday':
+              return 'Fri';
+            case 'Saturday':
+              return 'Sat';
+            case 'Sunday':
+              return 'Sun';
+            default:
+              return day;
+          }
+        })
+        .join(', ');
+  }
 
   List<TrainingLocation> _availableTrainingLocations = [];
 
   late final TrainerRepository _trainerRepository;
+  late final BookingRequestService _bookingRequestService;
 
   String? _selectedTime;
   final Set<String> _selectedDays = {};
@@ -43,12 +72,15 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
   bool _shareDetailsConsent = false;
   bool _showPhoneError = false;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
 
     _trainerRepository = TrainerRepository(Supabase.instance.client);
+
+    _bookingRequestService = BookingRequestService(Supabase.instance.client);
 
     _loadTrainerTrainingLocations();
   }
@@ -65,23 +97,14 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   TrainerRequestPayload _buildRequestPayload() {
     return TrainerRequestPayload(
       trainerId: widget.trainer.id,
-
-      customerName: _nameController.text,
-
+      customerName: _nameController.text.trim(),
       phone: UAEPhoneValidator.toE164(_whatsAppController.text),
-
       goal: _selectedGoal!,
-
       preferredDays: _selectedDays.map((day) => day.toLowerCase()).toList(),
-
       preferredTime: _selectedTime!.toLowerCase(),
-
       trainingLocationId: _selectedLocation!.id,
-
-      preferredArea: _preferredAreaController.text,
-
-      message: _notesController.text,
-
+      preferredArea: _preferredAreaController.text.trim(),
+      message: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       shareDetailsConsent: _shareDetailsConsent,
     );
   }
@@ -835,7 +858,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
     final canContinue = switch (_currentStep) {
       1 => stepOneComplete,
       2 => stepTwoComplete,
-      3 => stepThreeComplete,
+      3 => stepThreeComplete && !_isSubmitting,
       _ => false,
     };
 
@@ -907,7 +930,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
               // -----------------------------------------------------------------
               GSWButton(
                 size: GSWButtonSize.medium,
-                label: _currentStep == 3 ? 'Send Request' : 'Continue',
+                label: _currentStep == 3
+                    ? (_isSubmitting ? 'Sending...' : 'Send Request')
+                    : 'Continue',
                 onPressed: !canContinue
                     ? null
                     : () {
@@ -943,9 +968,54 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
     );
   }
 
-  void _submitRequest() {
+  Future<void> _submitRequest() async {
+    if (_isSubmitting) return;
+
     final payload = _buildRequestPayload();
 
-    debugPrint('Trainer request payload: ${payload.toJson()}');
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final result = await _bookingRequestService.submitTrainerRequest(payload);
+
+      if (!mounted) return;
+
+      final trainer = widget.trainer;
+
+      context.go(
+        GSWRoutes.bookingSuccess,
+        extra: TrainerRequestSuccessData(
+          requestId: result.requestId,
+          referenceCode: result.referenceCode,
+          trainerName: trainer.fullName,
+          rate: 'AED ${trainer.pricePerSession?.toInt() ?? 0}/session',
+          goal: _selectedGoal!,
+          days: _formattedSelectedDays(),
+          time: _selectedTime!,
+          trainingLocation: _selectedLocation!.name,
+          preferredArea: _preferredAreaController.text.trim(),
+        ),
+      );
+    } on BookingRequestException catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (error) {
+      debugPrint('Unexpected trainer request error: $error');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('We could not send your request. Please try again.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 }
