@@ -28,7 +28,9 @@ class TrainerVerificationSheet extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: GSWColors.surfacePrimary,
+      enableDrag: true,
+      isDismissible: true,
+      backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withValues(alpha: 0.7),
       builder: (_) {
         return TrainerVerificationSheet(trainerName: trainerName, items: items);
@@ -49,53 +51,72 @@ class TrainerVerificationSheet extends StatelessWidget {
           ),
           border: Border(top: BorderSide(color: GSWColors.borderSecondary)),
         ),
-        child: Column(
+        child: Stack(
           children: [
-            const SizedBox(height: 16),
+            Column(
+              children: [
+                const SizedBox(height: 16),
 
-            Container(
-              width: 47,
-              height: 5,
-              decoration: BoxDecoration(
-                color: GSWColors.iconTertiary,
-                borderRadius: BorderRadius.circular(GSWRadius.full),
-              ),
+                Container(
+                  width: 47,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: GSWColors.iconTertiary,
+                    borderRadius: BorderRadius.circular(GSWRadius.full),
+                  ),
+                ),
+
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          trainerName.toUpperCase(),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.headlineLarge?.copyWith(color: GSWColors.textPrimary),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        const Divider(height: 1, color: GSWColors.borderDisabled),
+
+                        const SizedBox(height: 16),
+
+                        _buildVerificationHeading(context),
+
+                        const SizedBox(height: 16),
+
+                        ...items.map((item) => _buildVerificationItem(context, item)),
+
+                        const SizedBox(height: 16),
+
+                        const Divider(height: 1, color: GSWColors.borderSecondary),
+
+                        const SizedBox(height: 16),
+
+                        _buildDisclaimer(context),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
 
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 18, 16, 28),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      trainerName.toUpperCase(),
-                      style: Theme.of(
-                        context,
-                      ).textTheme.headlineLarge?.copyWith(color: GSWColors.textPrimary),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    const Divider(height: 1, color: GSWColors.borderDisabled),
-
-                    const SizedBox(height: 16),
-
-                    _buildVerificationHeading(context),
-
-                    const SizedBox(height: 16),
-
-                    ...items.map((item) => _buildVerificationItem(context, item)),
-
-                    const SizedBox(height: 16),
-
-                    const Divider(height: 1, color: GSWColors.borderSecondary),
-
-                    const SizedBox(height: 16),
-
-                    _buildDisclaimer(context),
-                  ],
-                ),
+            Positioned(
+              top: 4,
+              right: 8,
+              child: IconButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+                tooltip: 'Close',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+                icon: const Icon(Icons.close_rounded, size: 22, color: GSWColors.iconTertiary),
               ),
             ),
           ],
@@ -114,6 +135,7 @@ class TrainerVerificationSheet extends StatelessWidget {
           height: 20,
           colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
         ),
+
         const SizedBox(width: 8),
 
         Expanded(

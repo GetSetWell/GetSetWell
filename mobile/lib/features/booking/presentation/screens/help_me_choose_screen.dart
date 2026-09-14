@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
+import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
@@ -8,15 +10,12 @@ import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:mobile/features/booking/data/services/booking_request_service.dart';
+import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
 import 'package:mobile/features/booking/domain/validators/uae_phone_validator.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/training_location.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:go_router/go_router.dart';
-
-import 'package:mobile/core/routing/gsw_routes.dart';
-import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 
 class HelpMeChooseScreen extends StatefulWidget {
   const HelpMeChooseScreen({super.key});
@@ -1013,35 +1012,28 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
       if (!mounted) return;
 
-context.go(
-  GSWRoutes.bookingSuccess,
-  extra: ConciergeMatchSuccessData(
-    requestId: result.requestId,
-    referenceCode: result.referenceCode,
-    goal: _summaryGoalLabel(_selectedGoal),
-    days: _selectedDays
-        .map((day) => day.substring(0, 3))
-        .join(', '),
-    time: _selectedTime ?? '',
-    trainingLocation: _selectedLocation?.name ?? '',
-    preferredArea: _preferredAreaController.text.trim(),
-    trainerPreference:
-        _selectedTrainerPreference == null ||
-                _selectedTrainerPreference == 'No preference'
-            ? null
-            : _selectedTrainerPreference,
-    budget:
-        _selectedBudget == null ||
-                _selectedBudget == 'No preference'
-            ? null
-            : _selectedBudget,
-    language:
-        _selectedLanguage == null ||
-                _selectedLanguage == 'No preference'
-            ? null
-            : _selectedLanguage,
-  ),
-);
+      context.go(
+        GSWRoutes.bookingSuccess,
+        extra: ConciergeMatchSuccessData(
+          requestId: result.requestId,
+          referenceCode: result.referenceCode,
+          goal: _summaryGoalLabel(_selectedGoal),
+          days: _selectedDays.map((day) => day.substring(0, 3)).join(', '),
+          time: _selectedTime ?? '',
+          trainingLocation: _selectedLocation?.name ?? '',
+          preferredArea: _preferredAreaController.text.trim(),
+          trainerPreference:
+              _selectedTrainerPreference == null || _selectedTrainerPreference == 'No preference'
+              ? null
+              : _selectedTrainerPreference,
+          budget: _selectedBudget == null || _selectedBudget == 'No preference'
+              ? null
+              : _selectedBudget,
+          language: _selectedLanguage == null || _selectedLanguage == 'No preference'
+              ? null
+              : _selectedLanguage,
+        ),
+      );
 
       // Success screen comes next.
     } on BookingRequestException catch (error) {
