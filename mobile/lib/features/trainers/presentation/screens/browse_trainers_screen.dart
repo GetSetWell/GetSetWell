@@ -5,6 +5,7 @@ import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:mobile/core/widgets/common/header.dart';
+import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_card.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_matching_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -102,6 +103,7 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
           ),
         ),
       ),
+      bottomNavigationBar: const GSWBottomNav(currentItem: GSWBottomNavItem.trainers),
     );
   }
 

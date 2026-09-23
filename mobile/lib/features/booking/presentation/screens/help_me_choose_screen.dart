@@ -6,13 +6,11 @@ import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
-import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
+import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
-import 'package:mobile/features/booking/data/services/booking_request_service.dart';
-import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
+import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
-import 'package:mobile/features/booking/domain/validators/uae_phone_validator.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/training_location.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -25,61 +23,53 @@ class HelpMeChooseScreen extends StatefulWidget {
 }
 
 class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
+  static const _interactiveSurface = Color(0xFF2E3944);
+
   int _currentStep = 1;
+  bool _showFemaleOnly = false;
+
   String? _selectedGoal;
 
   final Set<String> _selectedDays = {};
+  String? _selectedTime;
+
+  TrainingLocation? _selectedLocation;
+  final TextEditingController _preferredAreaController = TextEditingController();
+
   List<String> _availableLanguages = [];
   List<int> _availablePrices = [];
   List<TrainingLocation> _availableTrainingLocations = [];
+  Set<String> _availableSpecialtySlugs = {};
 
-  late final TrainerRepository _trainerRepository;
-  late final BookingRequestService _bookingRequestService;
-
-  bool _isSubmitting = false;
-
-  String? _selectedTime;
-  TrainingLocation? _selectedLocation;
-  String? _selectedTrainerPreference;
-  String? _selectedBudget;
   String? _selectedLanguage;
-  final TextEditingController _preferredAreaController = TextEditingController();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _whatsAppController = TextEditingController();
+
   final TextEditingController _notesController = TextEditingController();
 
-  bool _shareDetailsConsent = false;
-  bool _showPhoneError = false;
+  bool _isLoading = true;
+  bool _goalOptionsLoadFailed = false;
 
-  String? _trainerGenderValue() {
-    switch (_selectedTrainerPreference) {
-      case 'Male':
-        return 'male';
-      case 'Female':
-        return 'female';
-      case 'No preference':
-      case null:
-        return null;
-      default:
-        return null;
-    }
-  }
+  double? _budgetMinValue;
+  double? _budgetMaxValue;
 
-  ({int? min, int? max}) _budgetRange() {
-    if (_selectedBudget == null || _selectedBudget == 'No preference') {
-      return (min: null, max: null);
-    }
+  late final TrainerRepository _trainerRepository;
 
-    final matches = RegExp(
-      r'\d+',
-    ).allMatches(_selectedBudget!).map((match) => int.parse(match.group(0)!)).toList();
-
-    if (matches.length < 2) {
-      return (min: null, max: null);
-    }
-
-    return (min: matches[0], max: matches[1]);
-  }
+  static const List<_GoalDefinition> _goalDefinitions = [
+    _GoalDefinition(
+      label: 'Get stronger',
+      specialtySlugs: {'core-strength', 'strength', 'strength-training'},
+    ),
+    _GoalDefinition(label: 'Lose weight', specialtySlugs: {'weight-loss', 'fat-loss'}),
+    _GoalDefinition(
+      label: 'Move better',
+      specialtySlugs: {'mobility', 'beginner-yoga', 'yoga', 'pilates'},
+    ),
+    _GoalDefinition(label: 'Back after a break', alwaysAvailable: true),
+    _GoalDefinition(
+      label: 'Pre or postnatal',
+      specialtySlugs: {'pre-postnatal', 'postnatal', 'prenatal'},
+    ),
+    _GoalDefinition(label: 'Something else', alwaysAvailable: true),
+  ];
 
   @override
   void initState() {
@@ -87,69 +77,137 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
     _trainerRepository = TrainerRepository(Supabase.instance.client);
 
-    _bookingRequestService = BookingRequestService(Supabase.instance.client);
-
-    _loadMatchingOptions();
-  }
-
-  Future<void> _loadMatchingOptions() async {
-    try {
-      final languages = await _trainerRepository.getAvailableLanguages();
-
-      final prices = await _trainerRepository.getAvailablePrices();
-
-      final locations = await _trainerRepository.getAvailableTrainingLocations();
-
-      if (!mounted) return;
-
-      setState(() {
-        _availableLanguages = languages;
-        _availablePrices = prices;
-        _availableTrainingLocations = locations;
-      });
-    } catch (error) {
-      debugPrint('Failed to load matching options: $error');
-    }
-  }
-
-  List<String> get _availableBudgetOptions {
-    final bands = <String>{};
-
-    for (final price in _availablePrices) {
-      final lower = (price ~/ 100) * 100;
-      final upper = lower + 99;
-
-      bands.add('AED $lower–$upper');
-    }
-
-    return [...bands, 'No preference'];
+    _loadOptions();
   }
 
   @override
   void dispose() {
     _preferredAreaController.dispose();
-    _nameController.dispose();
-    _whatsAppController.dispose();
     _notesController.dispose();
     super.dispose();
   }
 
-  static const List<String> _goalOptions = [
-    'Build strength',
-    'Lose weight',
-    'Start again after a break',
-    'Improve mobility',
-    'Yoga or pilates',
-    'Pre or postnatal',
-    'Not sure yet',
-  ];
+  Future<void> _loadOptions() async {
+    try {
+      final results = await Future.wait([
+        _trainerRepository.getAvailableLanguages(),
+        _trainerRepository.getAvailablePrices(),
+        _trainerRepository.getAvailableTrainingLocations(),
+        _trainerRepository.getAvailableSpecialtySlugs(),
+      ]);
 
-  void _goNext() {
-    if (_currentStep >= 4) return;
+      if (!mounted) return;
 
-    setState(() {
-      _currentStep++;
-    });
+      final languages = results[0] as List<String>;
+      final prices = results[1] as List<int>;
+      final locations = results[2] as List<TrainingLocation>;
+      final specialtySlugs = results[3] as Set<String>;
+
+      final sortedPrices = prices.toSet().toList()..sort();
+
+      setState(() {
+        _availableLanguages = languages;
+        _availablePrices = sortedPrices;
+        _availableTrainingLocations = locations;
+        _availableSpecialtySlugs = specialtySlugs;
+        if (sortedPrices.isNotEmpty) {
+          _budgetMinValue = sortedPrices.first.toDouble();
+          _budgetMaxValue = sortedPrices.last.toDouble();
+        }
+
+        _isLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Failed to load Help Me Choose options: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _goalOptionsLoadFailed = true;
+        _isLoading = false;
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // BACKEND-DERIVED OPTIONS
+  // ---------------------------------------------------------------------------
+
+  List<_GoalDefinition> get _goalOptions {
+    if (_goalOptionsLoadFailed || _availableSpecialtySlugs.isEmpty) {
+      return _goalDefinitions;
+    }
+
+    return _goalDefinitions.where((goal) {
+      if (goal.alwaysAvailable) {
+        return true;
+      }
+
+      return goal.specialtySlugs.any(_availableSpecialtySlugs.contains);
+    }).toList();
+  }
+
+  List<TrainingLocation> get _matchingLocations {
+    return _availableTrainingLocations.where((location) {
+      final name = location.name.toLowerCase();
+
+      return name.contains('home') || name.contains('gym') || name.contains('outdoor');
+    }).toList();
+  }
+
+  String _locationLabel(TrainingLocation location) {
+    final value = location.name.toLowerCase();
+
+    if (value.contains('home')) {
+      return 'Home';
+    }
+
+    if (value.contains('gym')) {
+      return 'Gym';
+    }
+
+    if (value.contains('outdoor')) {
+      return 'Outdoors';
+    }
+
+    return location.name;
+  }
+
+  List<int> get _sortedPrices {
+    final prices = _availablePrices.toSet().toList();
+    prices.sort();
+    return prices;
+  }
+
+  int? get _selectedBudgetMin {
+    if (_budgetMinValue == null) {
+      return null;
+    }
+
+    return _roundBudgetValue(_budgetMinValue!);
+  }
+
+  int? get _selectedBudgetMax {
+    if (_budgetMaxValue == null) {
+      return null;
+    }
+
+    return _roundBudgetValue(_budgetMaxValue!);
+  }
+
+  int _roundBudgetValue(double value) {
+    // Keeps the display clean while the slider itself moves smoothly.
+    // Example: 247 becomes 245, 253 becomes 255.
+    return (value / 5).round() * 5;
+  }
+  // ---------------------------------------------------------------------------
+  // NAVIGATION
+  // ---------------------------------------------------------------------------
+
+  void _closeFlow() {
+    // Because Help Me Choose must always be opened using push(),
+    // pop() returns to the exact place from which it was opened.
+    context.pop();
   }
 
   void _goBack() {
@@ -160,21 +218,81 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     });
   }
 
+  void _goNext() {
+    if (_currentStep >= 4) return;
+
+    setState(() {
+      _currentStep++;
+    });
+  }
+
+  void _continueToAuth() {
+    final draft = ConciergeMatchPayload(
+      goal: _selectedGoal!,
+      preferredDays: _selectedDays.toList(),
+      preferredTime: _selectedTime!,
+      trainingLocationId: _selectedLocation!.id,
+      trainingLocationName: _locationLabel(_selectedLocation!),
+      preferredArea: _preferredAreaController.text.trim(),
+      budgetMin: _selectedBudgetMin,
+      budgetMax: _selectedBudgetMax,
+      femaleTrainerOnly: _showFemaleOnly,
+      languagePreference: _selectedLanguage,
+      message: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+    );
+
+    context.push(GSWRoutes.userAuth, extra: AuthFlowIntent.conciergeMatch(draft));
+  }
+
+  // ---------------------------------------------------------------------------
+  // VALIDATION
+  // ---------------------------------------------------------------------------
+
+  bool get _canContinue {
+    switch (_currentStep) {
+      case 1:
+        return _selectedGoal != null;
+
+      case 2:
+        return _selectedDays.isNotEmpty && _selectedTime != null;
+
+      case 3:
+        return _selectedLocation != null &&
+            _preferredAreaController.text.trim().isNotEmpty &&
+            _selectedBudgetMin != null &&
+            _selectedBudgetMax != null;
+
+      case 4:
+        // Everything on the final step is optional.
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCREEN
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
       body: SafeArea(
+        bottom: false,
         left: false,
         right: false,
-
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-
           children: [
             _buildProgressHeader(),
 
-            Expanded(child: _buildCurrentStep()),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator(color: GSWColors.primary))
+                  : _buildCurrentStep(),
+            ),
 
             _buildBottomActions(),
           ],
@@ -183,93 +301,28 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     );
   }
 
-  ConciergeMatchPayload _buildRequestPayload() {
-    final budget = _budgetRange();
-
-    return ConciergeMatchPayload(
-      customerName: _nameController.text,
-
-      phone: UAEPhoneValidator.toE164(_whatsAppController.text),
-
-      goal: _selectedGoal!,
-
-      preferredDays: _selectedDays.map((day) => day.toLowerCase()).toList(),
-
-      preferredTime: _selectedTime!.toLowerCase(),
-
-      trainingLocationId: _selectedLocation!.id,
-      preferredArea: _preferredAreaController.text,
-
-      trainerGenderPreference: _trainerGenderValue(),
-
-      budgetMin: budget.min,
-      budgetMax: budget.max,
-
-      languagePreference: _selectedLanguage == null || _selectedLanguage == 'No preference'
-          ? null
-          : _selectedLanguage,
-
-      message: _notesController.text,
-
-      shareDetailsConsent: _shareDetailsConsent,
-    );
-  }
-
-  Widget _buildTrainingLocationOptions() {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: _availableTrainingLocations.map((location) {
-        final isSelected = _selectedLocation?.id == location.id;
-
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              _selectedLocation = location;
-            });
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(100),
-              border: Border.all(
-                color: isSelected ? GSWColors.borderFocused : GSWColors.borderSecondary,
-              ),
-            ),
-            child: Text(
-              location.name,
-              style: GSWTextStyles.labelLarge.copyWith(
-                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-
   Widget _buildProgressHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
-            child: Container(
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: GSWColors.borderSecondary),
-              ),
-              child: SvgPicture.asset(
-                GSWIcons.close,
-                width: 16,
-                height: 16,
-                colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          Material(
+            color: Colors.transparent,
+            shape: CircleBorder(side: BorderSide(color: GSWColors.borderSecondary)),
+            child: InkWell(
+              onTap: _closeFlow,
+              customBorder: const CircleBorder(),
+              child: SizedBox(
+                width: 46,
+                height: 46,
+                child: Center(
+                  child: SvgPicture.asset(
+                    GSWIcons.close,
+                    width: 12,
+                    height: 12,
+                    colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+                  ),
+                ),
               ),
             ),
           ),
@@ -278,21 +331,21 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
           Expanded(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(100),
+              borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: _currentStep / 4,
                 minHeight: 8,
-                backgroundColor: GSWColors.surfaceElevated,
+                backgroundColor: _interactiveSurface,
                 valueColor: const AlwaysStoppedAnimation<Color>(GSWColors.primary),
               ),
             ),
           ),
 
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
 
           Text(
             '$_currentStep of 4',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
         ],
       ),
@@ -307,6 +360,91 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       4 => _buildStepFour(),
       _ => _buildStepOne(),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2.1 YOUR GOAL
+  // ---------------------------------------------------------------------------
+
+  Widget _buildStepOne() {
+    return _stepScrollView(
+      children: [
+        Text(
+          'What is your goal?',
+          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+        ),
+
+        const SizedBox(height: 24),
+
+        ..._goalOptions.map(
+          (goal) =>
+              Padding(padding: const EdgeInsets.only(bottom: 8), child: _buildGoalOption(goal)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGoalOption(_GoalDefinition goal) {
+    final selected = _selectedGoal == goal.label;
+
+    return _fullWidthOption(
+      label: goal.label,
+      selected: selected,
+      onTap: () {
+        setState(() {
+          _selectedGoal = goal.label;
+        });
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2.2 WHEN CAN YOU TRAIN?
+  // ---------------------------------------------------------------------------
+
+  Widget _buildStepTwo() {
+    return _stepScrollView(
+      children: [
+        Text(
+          'When can you train?',
+          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+        ),
+
+        const SizedBox(height: 24),
+
+        Text(
+          'Days that work',
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+        ),
+
+        const SizedBox(height: 8),
+
+        _buildDayOptions(),
+
+        const SizedBox(height: 24),
+
+        Text(
+          'Time of day',
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+        ),
+
+        const SizedBox(height: 8),
+
+        Row(
+          children: [
+            Expanded(child: _buildTimeOption('Morning')),
+
+            const SizedBox(width: 8),
+
+            Expanded(child: _buildTimeOption('Afternoon')),
+
+            const SizedBox(width: 8),
+
+            Expanded(child: _buildTimeOption('Evening')),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget _buildDayOptions() {
@@ -324,36 +462,40 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       spacing: 8,
       runSpacing: 8,
       children: days.entries.map((entry) {
-        final day = entry.key;
-        final shortDay = entry.value;
-        final isSelected = _selectedDays.contains(day);
+        final selected = _selectedDays.contains(entry.key);
 
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              if (isSelected) {
-                _selectedDays.remove(day);
-              } else {
-                _selectedDays.add(day);
-              }
-            });
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-              border: Border.all(
-                color: isSelected ? GSWColors.borderFocused : GSWColors.borderSecondary,
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () {
+              setState(() {
+                if (selected) {
+                  _selectedDays.remove(entry.key);
+                } else {
+                  _selectedDays.add(entry.key);
+                }
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              curve: Curves.easeOut,
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? GSWColors.primary : GSWColors.surfaceElevated,
+                border: Border.all(
+                  width: 1,
+                  color: selected ? GSWColors.primary : GSWColors.borderSecondary,
+                ),
               ),
-            ),
-            child: Text(
-              shortDay,
-              style: GSWTextStyles.labelLarge.copyWith(
-                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+              child: Text(
+                entry.value,
+                style: GSWTextStyles.labelLarge.copyWith(
+                  color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                ),
               ),
             ),
           ),
@@ -362,766 +504,561 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     );
   }
 
-  Widget _buildGoalOption(String goal) {
-    final isSelected = _selectedGoal == goal;
+  Widget _buildTimeOption(String label) {
+    final isSelected = _selectedTime == label;
 
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedGoal = goal;
-        });
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        constraints: const BoxConstraints(minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        alignment: Alignment.centerLeft,
-        decoration: BoxDecoration(
-          color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(100),
-          border: Border.all(color: isSelected ? GSWColors.primary : GSWColors.borderSecondary),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedTime = label;
+          });
+        },
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          width: double.infinity,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              width: 1,
+              color: isSelected ? GSWColors.primary : GSWColors.borderSecondary,
+            ),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            style: GSWTextStyles.labelLarge.copyWith(
+              color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+            ),
+          ),
         ),
-        child: Text(
-          goal,
-          style: GSWTextStyles.labelLarge.copyWith(
-            color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+      ),
+    );
+  }
+  // ---------------------------------------------------------------------------
+  // 2.3 WHERE + BUDGET
+  // ---------------------------------------------------------------------------
+
+  Widget _buildStepThree() {
+    return _stepScrollView(
+      children: [
+        Text(
+          'Where, and what is your budget?',
+          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+        ),
+
+        const SizedBox(height: 24),
+
+        Text('Where', style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
+
+        const SizedBox(height: 8),
+
+        _buildWhereOptions(),
+
+        const SizedBox(height: 24),
+
+        GSWTextField(
+          size: GSWTextFieldSize.large,
+          controller: _preferredAreaController,
+          label: 'Preferred area',
+          hintText: 'Dubai Marina',
+          textInputAction: TextInputAction.done,
+          onChanged: (_) {
+            setState(() {});
+          },
+        ),
+
+        const SizedBox(height: 24),
+
+        _buildBudgetSection(),
+      ],
+    );
+  }
+
+  Widget _buildWhereOptions() {
+    final locations = [..._matchingLocations];
+
+    // Keep the exact visual order from Figma.
+    const order = {'Home': 0, 'Gym': 1, 'Outdoors': 2};
+
+    locations.sort((a, b) {
+      final aLabel = _locationLabel(a);
+      final bLabel = _locationLabel(b);
+
+      return (order[aLabel] ?? 99).compareTo(order[bLabel] ?? 99);
+    });
+
+    return Row(
+      children: [
+        for (int index = 0; index < locations.length; index++) ...[
+          Expanded(child: _buildWhereOption(locations[index])),
+
+          if (index < locations.length - 1) const SizedBox(width: 8),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildWhereOption(TrainingLocation location) {
+    final isSelected = _selectedLocation?.id == location.id;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedLocation = location;
+          });
+        },
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          width: double.infinity,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFFDAE64B) : const Color(0xFF1A2532),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              width: 1,
+              color: isSelected ? const Color(0xFFDAE64B) : const Color(0xFF586169),
+            ),
+          ),
+          child: Text(
+            _locationLabel(location),
+            maxLines: 1,
+            textAlign: TextAlign.center,
+            style: GSWTextStyles.labelLarge.copyWith(
+              color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSingleSelectOptions({
-    required List<String> options,
-    required String? selectedValue,
-    required ValueChanged<String> onSelected,
-  }) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: options.map((option) {
-        final isSelected = selectedValue == option;
+  Widget _buildBudgetSection() {
+    final prices = _sortedPrices;
 
-        return GestureDetector(
-          onTap: () => onSelected(option),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(100),
-              border: Border.all(
-                color: isSelected ? GSWColors.borderFocused : GSWColors.borderSecondary,
-              ),
-            ),
-            child: Text(
-              option,
-              style: GSWTextStyles.labelLarge.copyWith(
-                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
-              ),
-            ),
+    if (prices.isEmpty || _budgetMinValue == null || _budgetMaxValue == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Budget per session',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
-        );
-      }).toList(),
-    );
-  }
 
-  Widget _buildOptionalSelectOptions({
-    required List<String> options,
-    required String? selectedValue,
-    required ValueChanged<String?> onSelected,
-  }) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: options.map((option) {
-        final isSelected = selectedValue == option;
+          const SizedBox(height: 12),
 
-        return GestureDetector(
-          onTap: () {
-            onSelected(isSelected ? null : option);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(100),
-              border: Border.all(
-                color: isSelected ? GSWColors.borderFocused : GSWColors.borderSecondary,
-              ),
-            ),
-            child: Text(
-              option,
-              style: GSWTextStyles.labelLarge.copyWith(
-                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
-              ),
-            ),
+          Text(
+            'No session prices available',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
-        );
-      }).toList(),
-    );
-  }
+        ],
+      );
+    }
 
-  Widget _buildSummaryItem(String label, String value, {bool accent = false}) {
+    final absoluteMin = prices.first.toDouble();
+
+    final absoluteMax = prices.last.toDouble();
+
+    final selectedMin = _selectedBudgetMin ?? prices.first;
+
+    final selectedMax = _selectedBudgetMax ?? prices.last;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
+        Text(
+          'Budget per session',
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+        ),
 
-        const SizedBox(height: 4),
+        const SizedBox(height: 12),
 
         Text(
-          value,
-          style: GSWTextStyles.bodyMedium.copyWith(
-            color: accent ? GSWColors.textAccent : GSWColors.textPrimary,
+          selectedMin == selectedMax ? 'AED $selectedMin' : 'AED $selectedMin to AED $selectedMax',
+          style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+        ),
+
+        const SizedBox(height: 8),
+
+        if (absoluteMin == absoluteMax)
+          SizedBox(
+            height: 24,
+            child: Center(
+              child: Container(
+                width: double.infinity,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: GSWColors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          )
+        else
+          SizedBox(
+            height: 32,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
+
+                activeTrackColor: GSWColors.primary,
+
+                inactiveTrackColor: const Color(0xFF2E3944),
+
+                thumbColor: GSWColors.primary,
+
+                overlayColor: GSWColors.primary.withValues(alpha: 0.10),
+
+                rangeThumbShape: const RoundRangeSliderThumbShape(
+                  enabledThumbRadius: 12,
+                  elevation: 0,
+                  pressedElevation: 0,
+                ),
+
+                rangeTrackShape: const EdgeToEdgeRangeSliderTrackShape(),
+
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
+
+                showValueIndicator: ShowValueIndicator.never,
+              ),
+
+              child: RangeSlider(
+                min: absoluteMin,
+                max: absoluteMax,
+
+                // IMPORTANT:
+                // No divisions.
+                // This makes the slider continuous and smooth.
+                values: RangeValues(
+                  _budgetMinValue!.clamp(absoluteMin, absoluteMax),
+                  _budgetMaxValue!.clamp(absoluteMin, absoluteMax),
+                ),
+
+                onChanged: (RangeValues values) {
+                  setState(() {
+                    _budgetMinValue = values.start;
+
+                    _budgetMaxValue = values.end;
+                  });
+                },
+              ),
+            ),
           ),
+
+        const SizedBox(height: 8),
+
+        Text(
+          "This is the trainer's session rate. A 5% service fee is added at checkout.",
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
         ),
       ],
     );
   }
 
-  String _summaryGoalLabel(String? goal) {
-    switch (goal) {
-      case 'Start again after a break':
-        return 'Start again';
-
-      case 'Pre or postnatal':
-        return 'Pre/postnatal';
-
-      case null:
-        return '';
-
-      default:
-        return goal;
-    }
-  }
-
-  Widget _buildRequestSummary() {
-    final days = _selectedDays
-        .map((day) {
-          const abbreviations = {
-            'Monday': 'Mon',
-            'Tuesday': 'Tue',
-            'Wednesday': 'Wed',
-            'Thursday': 'Thu',
-            'Friday': 'Fri',
-            'Saturday': 'Sat',
-            'Sunday': 'Sun',
-          };
-
-          return abbreviations[day] ?? day;
-        })
-        .join(', ');
-
-    String trainerPreference = '';
-
-    if (_selectedTrainerPreference != null) {
-      trainerPreference = _selectedTrainerPreference!;
-    }
-
-    if (_selectedBudget != null) {
-      if (trainerPreference.isNotEmpty) {
-        trainerPreference += ', ';
-      }
-
-      trainerPreference += 'AED ${_selectedBudget!}';
-    }
-
-    if (trainerPreference.isEmpty) {
-      trainerPreference = 'No preference';
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.backgroundSecondary,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Your request',
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textSecondary),
-                ),
-              ),
-
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _currentStep = 1;
-                  });
-                },
-                child: Row(
-                  children: [
-                    Text(
-                      'Edit',
-                      style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textAccent),
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    SvgPicture.asset(
-                      GSWIcons.edit,
-                      width: 20,
-                      height: 20,
-                      colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          Divider(height: 1, color: GSWColors.borderDisabled),
-
-          const SizedBox(height: 12),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _buildSummaryItem('Goal', _summaryGoalLabel(_selectedGoal))),
-
-              const SizedBox(width: 12),
-
-              Expanded(child: _buildSummaryItem('Days', days)),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _buildSummaryItem('Time', _selectedTime ?? '')),
-
-              const SizedBox(width: 12),
-
-              Expanded(child: _buildSummaryItem('Where', _selectedLocation?.name ?? '')),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _buildSummaryItem('Preferred Area', _preferredAreaController.text.trim()),
-              ),
-
-              const SizedBox(width: 12),
-
-              Expanded(child: _buildSummaryItem('Trainer', trainerPreference, accent: true)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  bool get _canContinue {
-    switch (_currentStep) {
-      case 1:
-        return _selectedGoal != null;
-
-      case 2:
-        return _selectedDays.isNotEmpty &&
-            _selectedTime != null &&
-            _selectedLocation != null &&
-            _preferredAreaController.text.trim().isNotEmpty;
-
-      case 3:
-        return true;
-
-      case 4:
-        return _nameController.text.trim().isNotEmpty &&
-            UAEPhoneValidator.isValid(_whatsAppController.text) &&
-            _shareDetailsConsent;
-
-      default:
-        return false;
-    }
-  }
-
-  Widget _buildStepOne() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-      physics: const ClampingScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          RichText(
-            text: TextSpan(
-              style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary, height: 1),
-              children: [
-                const TextSpan(text: 'WHAT ARE YOU\n'),
-                TextSpan(
-                  text: 'LOOKING FOR?',
-                  style: GSWTextStyles.displayLarge.copyWith(
-                    color: GSWColors.textAccent,
-                    height: 1,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          Text(
-            'Four quick questions, it’ll only take about a minute.',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-
-          const SizedBox(height: 24),
-
-          ..._goalOptions.map(
-            (goal) =>
-                Padding(padding: const EdgeInsets.only(bottom: 8), child: _buildGoalOption(goal)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepTwo() {
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RichText(
-              text: TextSpan(
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary, height: 1),
-                children: [
-                  const TextSpan(text: 'WHEN AND WHERE\n'),
-                  TextSpan(
-                    text: 'CAN YOU TRAIN?',
-                    style: GSWTextStyles.displayLarge.copyWith(
-                      color: GSWColors.textAccent,
-                      height: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Days that work',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            _buildDayOptions(),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Time of day',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            _buildSingleSelectOptions(
-              options: const ['Morning', 'Afternoon', 'Evening'],
-              selectedValue: _selectedTime,
-              onSelected: (value) {
-                setState(() {
-                  _selectedTime = value;
-                });
-              },
-            ),
-
-            const SizedBox(height: 24),
-
-            Text('Where', style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
-
-            const SizedBox(height: 8),
-
-            _buildTrainingLocationOptions(),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Preferred area',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            GSWTextField(
-              size: GSWTextFieldSize.large,
-              controller: _preferredAreaController,
-              hintText: 'Dubai Marina',
-              leadingIcon: GSWIcons.location,
-              onChanged: (_) {
-                setState(() {});
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStepThree() {
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RichText(
-              text: TextSpan(
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary),
-                children: [
-                  const TextSpan(text: 'ANY '),
-                  TextSpan(
-                    text: 'PREFERENCES?',
-                    style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textAccent),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            Text(
-              'Optional. It just helps us narrow things down.',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Trainer preference',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            _buildOptionalSelectOptions(
-              options: const ['Male', 'Female', 'No preference'],
-              selectedValue: _selectedTrainerPreference,
-              onSelected: (value) {
-                setState(() {
-                  _selectedTrainerPreference = value;
-                });
-              },
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'How much do you want to spend per session?',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            _buildOptionalSelectOptions(
-              options: _availableBudgetOptions,
-              selectedValue: _selectedBudget,
-              onSelected: (value) {
-                setState(() {
-                  _selectedBudget = value;
-                });
-              },
-            ),
-
-            const SizedBox(height: 8),
-
-            Text(
-              'A guide only. We show exact rates before anything is agreed.',
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Language you would prefer',
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            _buildOptionalSelectOptions(
-              options: [..._availableLanguages, 'No preference'],
-              selectedValue: _selectedLanguage,
-              onSelected: (value) {
-                setState(() {
-                  _selectedLanguage = value;
-                });
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // ---------------------------------------------------------------------------
+  // 2.4 ANYTHING ELSE
+  // ---------------------------------------------------------------------------
 
   Widget _buildStepFour() {
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RichText(
-              text: TextSpan(
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary),
-                children: [
-                  const TextSpan(text: 'LAST BIT. HOW CAN\nWE '),
-                  TextSpan(
-                    text: 'REACH YOU?',
-                    style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textAccent),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            _buildRequestSummary(),
-
-            const SizedBox(height: 24),
-
-            GSWTextField(
-              size: GSWTextFieldSize.large,
-              controller: _nameController,
-              label: 'Full name',
-              hintText: 'Your name',
-              textInputAction: TextInputAction.next,
-              onChanged: (_) {
-                setState(() {});
-              },
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'WhatsApp number',
-              style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 8),
-
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 48,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: GSWColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: GSWColors.borderSecondary),
-                  ),
-                  child: Text(
-                    '+971',
-                    style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: GSWTextField(
-                    size: GSWTextFieldSize.large,
-                    controller: _whatsAppController,
-                    hintText: '50 123 4567',
-                    keyboardType: TextInputType.phone,
-                    textInputAction: TextInputAction.next,
-
-                    errorText:
-                        _showPhoneError && !UAEPhoneValidator.isValid(_whatsAppController.text)
-                        ? 'Enter a valid UAE mobile number'
-                        : null,
-
-                    onChanged: (_) {
-                      setState(() {
-                        if (_showPhoneError) {
-                          _showPhoneError = !UAEPhoneValidator.isValid(_whatsAppController.text);
-                        }
-                      });
-                    },
-
-                    onComplete: (_) {
-                      setState(() {
-                        _showPhoneError = !UAEPhoneValidator.isValid(_whatsAppController.text);
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            GSWTextArea(
-              size: GSWTextAreaSize.large,
-              controller: _notesController,
-              label: 'Anything else we should know?',
-              hintText: 'Optional...',
-              helpingText: 'Please do not include detailed medical information here.',
-              maxLength: 250,
-              onChanged: (_) {
-                setState(() {});
-              },
-            ),
-          ],
+    return _stepScrollView(
+      children: [
+        Text(
+          'Anything else we should know?',
+          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
         ),
-      ),
+
+        const SizedBox(height: 24),
+
+        Text('Trainer', style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary)),
+
+        const SizedBox(height: 12),
+
+        _buildFemaleOnlyToggle(context),
+
+        const SizedBox(height: 24),
+
+        Text('Language', style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary)),
+
+        const SizedBox(height: 12),
+
+        _buildLanguages(),
+
+        const SizedBox(height: 24),
+
+        GSWTextArea(
+          size: GSWTextAreaSize.large,
+          controller: _notesController,
+          hintText: 'Tell us anything that would help us pick the right person...',
+          helpingText: 'A real person reads this.',
+          maxLength: 250,
+          onChanged: (_) {
+            setState(() {});
+          },
+        ),
+
+        const SizedBox(height: 24),
+
+        Text(
+          'Please do not put detailed medical information here. '
+          'Your trainer will do a health screening before your first session.',
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+        ),
+      ],
     );
   }
 
-  Future<void> _submitRequest() async {
-    if (_isSubmitting) return;
-
-    final payload = _buildRequestPayload();
-
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    try {
-      final result = await _bookingRequestService.submitConciergeMatch(payload);
-
-      if (!mounted) return;
-
-      if (!mounted) return;
-
-      context.go(
-        GSWRoutes.bookingSuccess,
-        extra: ConciergeMatchSuccessData(
-          requestId: result.requestId,
-          referenceCode: result.referenceCode,
-          goal: _summaryGoalLabel(_selectedGoal),
-          days: _selectedDays.map((day) => day.substring(0, 3)).join(', '),
-          time: _selectedTime ?? '',
-          trainingLocation: _selectedLocation?.name ?? '',
-          preferredArea: _preferredAreaController.text.trim(),
-          trainerPreference:
-              _selectedTrainerPreference == null || _selectedTrainerPreference == 'No preference'
-              ? null
-              : _selectedTrainerPreference,
-          budget: _selectedBudget == null || _selectedBudget == 'No preference'
-              ? null
-              : _selectedBudget,
-          language: _selectedLanguage == null || _selectedLanguage == 'No preference'
-              ? null
-              : _selectedLanguage,
-        ),
-      );
-
-      // Success screen comes next.
-    } on BookingRequestException catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
-    } catch (error) {
-      debugPrint('Unexpected booking request error: $error');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('We could not send your request. Please try again.')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
-    }
-  }
-
-  Widget _buildBottomActions() {
-    final canPressButton = _currentStep == 4 ? _canContinue && !_isSubmitting : _canContinue;
+  Widget _buildFemaleOnlyToggle(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: const BoxDecoration(color: GSWColors.backgroundSecondary),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      height: 44,
+      padding: const EdgeInsets.only(left: 12, right: 12),
+      decoration: BoxDecoration(
+        color: GSWColors.backgroundSecondary,
+        border: Border.all(color: GSWColors.borderSecondary),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
         children: [
-          if (_currentStep == 4) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: GSWCheckbox(
-                    value: _shareDetailsConsent,
-                    size: 24,
-                    iconSize: 14,
-                    onChanged: (value) {
-                      setState(() {
-                        _shareDetailsConsent = value;
-                      });
-                    },
-                  ),
-                ),
-
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: Text(
-                    'I agree to share my details with GetSetWell and the trainer '
-                    'they match me with so they can respond to my request.',
-                    style: GSWTextStyles.bodySmall.copyWith(
-                      color: GSWColors.textSecondary,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
+          Expanded(
+            child: Text(
+              'Show female trainers only',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: GSWColors.textPrimary),
             ),
-
-            const SizedBox(height: 12),
-          ],
-          GSWButton(
-            variant: _currentStep == 1 ? GSWButtonVariant.disabled : GSWButtonVariant.secondary,
-            size: GSWButtonSize.medium,
-            label: 'Back',
-            onPressed: _currentStep == 1 ? null : _goBack,
           ),
 
-          const SizedBox(height: 8),
-
-          GSWButton(
-            variant: canPressButton ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
-            size: GSWButtonSize.medium,
-            label: _currentStep == 4 ? (_isSubmitting ? 'Sending...' : 'Send Request') : 'Continue',
-            onPressed: !canPressButton
-                ? null
-                : _currentStep == 4
-                ? _submitRequest
-                : _goNext,
+          GSWToggle(
+            value: _showFemaleOnly,
+            onChanged: (value) {
+              setState(() {
+                _showFemaleOnly = value;
+              });
+            },
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildLanguages() {
+    if (_availableLanguages.isEmpty) {
+      return Text(
+        'No language options available',
+        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+      );
+    }
+
+    final languages = [..._availableLanguages];
+
+    // English first, then keep the remaining values alphabetical.
+    languages.sort((a, b) {
+      final aLower = a.toLowerCase();
+      final bLower = b.toLowerCase();
+
+      if (aLower == 'english') return -1;
+      if (bLower == 'english') return 1;
+
+      return a.compareTo(b);
+    });
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: languages.map((language) {
+        final isSelected = _selectedLanguage == language;
+
+        return _buildLanguageChip(
+          label: language,
+          selected: isSelected,
+          onTap: () {
+            setState(() {
+              _selectedLanguage = isSelected ? null : language;
+            });
+          },
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildLanguageChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFDAE64B) : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              width: 1,
+              color: selected ? const Color(0xFFDAE64B) : const Color(0xFF2E3944),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // SHARED CONTROLS
+  // ---------------------------------------------------------------------------
+
+  Widget _stepScrollView({required List<Widget> children}) {
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+      child: ListView(
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        children: children,
+      ),
+    );
+  }
+
+  Widget _fullWidthOption({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected ? GSWColors.primary : GSWColors.surfaceElevated,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: 48,
+          width: double.infinity,
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
+          ),
+          child: Text(
+            label,
+            style: GSWTextStyles.labelLarge.copyWith(
+              color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // FIXED BOTTOM ACTIONS
+  // ---------------------------------------------------------------------------
+
+  Widget _buildBottomActions() {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: GSWColors.backgroundSecondary,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(16),
+          topRight: Radius.circular(16),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_currentStep > 1) ...[
+                GSWButton(
+                  size: GSWButtonSize.large,
+                  variant: GSWButtonVariant.secondary,
+                  label: 'Back',
+                  onPressed: _goBack,
+                ),
+
+                const SizedBox(height: 8),
+              ],
+
+              GSWButton(
+                size: GSWButtonSize.large,
+                variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+                label: _currentStep == 4 ? 'Continue to send request' : 'Continue',
+                onPressed: !_canContinue
+                    ? null
+                    : _currentStep == 4
+                    ? _continueToAuth
+                    : _goNext,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GoalDefinition {
+  const _GoalDefinition({
+    required this.label,
+    this.specialtySlugs = const {},
+    this.alwaysAvailable = false,
+  });
+
+  final String label;
+  final Set<String> specialtySlugs;
+  final bool alwaysAvailable;
+}
+
+class EdgeToEdgeRangeSliderTrackShape extends RoundedRectRangeSliderTrackShape {
+  const EdgeToEdgeRangeSliderTrackShape();
+
+  @override
+  Rect getPreferredRect({
+    required RenderBox parentBox,
+    Offset offset = Offset.zero,
+    required SliderThemeData sliderTheme,
+    bool isEnabled = false,
+    bool isDiscrete = false,
+  }) {
+    final trackHeight = sliderTheme.trackHeight ?? 4;
+
+    final trackLeft = offset.dx;
+    final trackTop = offset.dy + (parentBox.size.height - trackHeight) / 2;
+
+    final trackWidth = parentBox.size.width;
+
+    return Rect.fromLTWH(trackLeft, trackTop, trackWidth, trackHeight);
   }
 }

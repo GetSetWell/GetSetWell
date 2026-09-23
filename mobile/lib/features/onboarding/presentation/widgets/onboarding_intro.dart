@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_spacing.dart';
 
 class OnboardingIntro extends StatelessWidget {
   const OnboardingIntro({super.key});
@@ -15,16 +16,18 @@ class OnboardingIntro extends StatelessWidget {
               TextSpan(text: 'FIND THE TRAINER\n', style: Theme.of(context).textTheme.displayLarge),
               TextSpan(text: 'WHO ', style: Theme.of(context).textTheme.displayLarge),
               TextSpan(
-                text: 'FITS YOUR LIFE.',
+                text: 'FITS YOUR\nLIFE.',
                 style: Theme.of(context).textTheme.displayLarge?.copyWith(color: GSWColors.primary),
               ),
             ],
           ),
         ),
 
+        SizedBox(height: GSWSpacing.sm),
+
         Text(
-          'Tell us your goals, location, and schedule. We’ll help you find a verified trainer who feels right for you.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: const Color(0xFF9CA3AF)),
+          'Dubai trainers, checked before they appear. Choose yourself, or let us pick.',
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: GSWColors.textSecondary),
         ),
       ],
     );

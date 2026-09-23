@@ -41,6 +41,8 @@ dependencies:
   flutter_svg: ^2.2.0
   supabase_flutter: ^2.17.1
   url_launcher: ^6.3.2
+  country_picker: ^2.0.28
+  phone_numbers_parser: ^9.0.26
 
 dev_dependencies:
   flutter_test:

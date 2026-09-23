@@ -102,6 +102,13 @@ class GSWTextStyles {
   );
 
   // Title
+  static const TextStyle titleExtraLarge = TextStyle(
+    fontFamily: 'Outfit',
+    fontSize: 28,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0,
+  );
+
   static const TextStyle titleLarge = TextStyle(
     fontFamily: 'Outfit',
     fontSize: 24,

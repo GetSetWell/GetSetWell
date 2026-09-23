@@ -19,11 +19,16 @@ class GSWIcons {
   static const String filter = 'assets/icons/filter.svg';
   static const String invisible = 'assets/icons/invisible.svg';
   static const String clock = 'assets/icons/time.svg';
-  static const String calendar = 'assets/icons/calender.svg';
+  static const String calender = 'assets/icons/calender.svg';
+  static const String calendar = 'assets/icons/calendar.svg';
   static const String cash = 'assets/icons/cash.svg';
   static const String close = 'assets/icons/close.svg';
   static const String edit = 'assets/icons/edit.svg';
   static const String check = 'assets/icons/check.svg';
   static const String chatCheck = 'assets/icons/chat_check.svg';
   static const String whatsapp = 'assets/icons/whatsapp.svg';
+  static const String bell = 'assets/icons/bell.svg';
+  static const String home = 'assets/icons/home.svg';
+  static const String search = 'assets/icons/search.svg';
+  static const String profile = 'assets/icons/profile.svg';
 }

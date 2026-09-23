@@ -73,6 +73,39 @@ class TrainerRepository {
     return response.map<TrainingLocation>((row) => TrainingLocation.fromJson(row)).toList();
   }
 
+  Future<Set<String>> getAvailableSpecialtySlugs() async {
+    final response = await _client
+        .from('trainer_specialties')
+        .select('''
+        specialties!inner (
+          slug
+        ),
+        trainers!inner (
+          id,
+          is_active,
+          is_verified
+        )
+      ''')
+        .eq('trainers.is_active', true)
+        .eq('trainers.is_verified', true);
+
+    final slugs = <String>{};
+
+    for (final row in response) {
+      final specialty = row['specialties'];
+
+      if (specialty is Map) {
+        final slug = specialty['slug'];
+
+        if (slug is String && slug.trim().isNotEmpty) {
+          slugs.add(slug.trim().toLowerCase());
+        }
+      }
+    }
+
+    return slugs;
+  }
+
   Future<List<TrainingLocation>> getTrainerTrainingLocations(String trainerId) async {
     final response = await _client
         .from('trainer_training_locations')

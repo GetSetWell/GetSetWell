@@ -75,7 +75,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
         _buildTalkNowCard(),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 48),
 
         _buildContactCopy(successData.referenceCode),
 
@@ -84,8 +84,8 @@ class BookingSuccessScreen extends StatelessWidget {
         GSWButton(
           size: GSWButtonSize.large,
           variant: GSWButtonVariant.secondary,
-          label: 'Browse trainers',
-          onPressed: () => _goToTrainers(context),
+          label: 'Go to home',
+          onPressed: () => _goToHome(context),
         ),
 
         const SizedBox(height: 8),
@@ -133,8 +133,7 @@ class BookingSuccessScreen extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
-            'Nothing is booked. A person will read this and come back '
-            'with a shortlist on WhatsApp.',
+            'Nothing is booked. A person will read this and you’ll be notified via app & WhatsApp.',
             textAlign: TextAlign.center,
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
@@ -194,7 +193,7 @@ class BookingSuccessScreen extends StatelessWidget {
           _SummaryRow(
             leftLabel: 'Preferred Area',
             leftValue: data.preferredArea,
-            rightLabel: 'Trainer',
+            rightLabel: 'Trainer preference',
             rightValue: _trainerPreferenceSummary(data),
             highlightRight: _hasTrainerPreference(data),
           ),
@@ -269,8 +268,8 @@ class BookingSuccessScreen extends StatelessWidget {
         GSWButton(
           size: GSWButtonSize.large,
           variant: GSWButtonVariant.secondary,
-          label: 'Back to trainers',
-          onPressed: () => _goToTrainers(context),
+          label: 'Back to home',
+          onPressed: () => _goToHome(context),
         ),
 
         const SizedBox(height: 8),
@@ -437,15 +436,15 @@ class BookingSuccessScreen extends StatelessWidget {
       TextSpan(
         children: [
           TextSpan(
-            text: 'Wrong number, or want to change something?\n',
+            text: 'Any questions? Email ',
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
           TextSpan(
-            text: 'Email info@getsetwell.com',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            text: 'info@getsetwell.com',
+            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
           ),
           TextSpan(
-            text: ' quoting $referenceCode.',
+            text: ' and quote $referenceCode.',
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
         ],
@@ -458,8 +457,8 @@ class BookingSuccessScreen extends StatelessWidget {
   // Actions
   // ---------------------------------------------------------------------------
 
-  void _goToTrainers(BuildContext context) {
-    context.go(GSWRoutes.trainer);
+  void _goToHome(BuildContext context) {
+    context.go(GSWRoutes.home);
   }
 
   Future<void> _openWhatsApp(BuildContext context, String referenceCode) async {
@@ -533,8 +532,7 @@ class _SummaryRow extends StatelessWidget {
           child: _SummaryItem(label: leftLabel, value: leftValue),
         ),
 
-        const SizedBox(width: 16),
-
+        const SizedBox(width: 12),
         Expanded(
           child: _SummaryItem(label: rightLabel, value: rightValue, highlight: highlightRight),
         ),
@@ -555,12 +553,21 @@ class _SummaryItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: true,
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+        ),
 
         const SizedBox(height: 4),
 
         Text(
           value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          softWrap: true,
           style: GSWTextStyles.bodyMedium.copyWith(
             color: highlight ? GSWColors.textAccent : GSWColors.textPrimary,
           ),
@@ -600,9 +607,7 @@ class _ConciergeNextStepsCard extends StatelessWidget {
           _NextStep(
             number: '2',
             title: 'We suggest who fits',
-            description:
-                'One or two trainers, with rates, and why we picked them. '
-                'Not a list of forty.',
+            description: 'One trainer who fits best, with the session fee and why we picked them.',
           ),
 
           SizedBox(height: 8),
@@ -611,8 +616,7 @@ class _ConciergeNextStepsCard extends StatelessWidget {
             number: '3',
             title: 'You decide',
             description:
-                'Take one, ask for others, or leave it. No obligation and '
-                'no follow up calls.',
+                'Go ahead, ask for another option, or leave it. No obligation and no follow up calls.',
           ),
         ],
       ),

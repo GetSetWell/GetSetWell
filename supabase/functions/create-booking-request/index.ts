@@ -33,6 +33,9 @@ const uuidPattern =
 const uaeMobilePattern =
   /^\+971(50|52|54|55|56|58)\d{7}$/;
 
+const internationalPhonePattern =
+  /^\+[1-9]\d{7,14}$/;
+
 type JsonObject = Record<string, unknown>;
 
 type RequestType =
@@ -48,6 +51,13 @@ type TrainerAvailabilityRow = {
 
 type TrainerLocationRelationRow = {
   trainer_id: string;
+};
+
+type AuthenticatedCustomer = {
+  userId: string;
+  fullName: string;
+  phone: string;
+  city: string;
 };
 
 const supabaseUrl =
@@ -109,30 +119,10 @@ function isUuid(
   );
 }
 
-function validateCommonFields(
+function validateRequestFields(
   body: JsonObject,
 ): string[] {
   const errors: string[] = [];
-
-  if (
-    !isNonEmptyString(
-      body.customer_name,
-      100,
-    )
-  ) {
-    errors.push(
-      "customer_name is required",
-    );
-  }
-
-  if (
-    typeof body.phone !== "string" ||
-    !uaeMobilePattern.test(body.phone)
-  ) {
-    errors.push(
-      "phone must be a valid UAE mobile number",
-    );
-  }
 
   if (
     !isNonEmptyString(
@@ -193,14 +183,6 @@ function validateCommonFields(
   }
 
   if (
-    body.share_details_consent !== true
-  ) {
-    errors.push(
-      "share_details_consent must be true",
-    );
-  }
-
-  if (
     body.message !== undefined &&
     body.message !== null
   ) {
@@ -221,7 +203,36 @@ function validateTrainerRequest(
   body: JsonObject,
 ): string[] {
   const errors =
-    validateCommonFields(body);
+    validateRequestFields(body);
+
+  // Keep the existing V1 trainer-request contract intact.
+  if (
+    !isNonEmptyString(
+      body.customer_name,
+      100,
+    )
+  ) {
+    errors.push(
+      "customer_name is required",
+    );
+  }
+
+  if (
+    typeof body.phone !== "string" ||
+    !uaeMobilePattern.test(body.phone)
+  ) {
+    errors.push(
+      "phone must be a valid UAE mobile number",
+    );
+  }
+
+  if (
+    body.share_details_consent !== true
+  ) {
+    errors.push(
+      "share_details_consent must be true",
+    );
+  }
 
   if (!isUuid(body.trainer_id)) {
     errors.push(
@@ -248,7 +259,27 @@ function validateConciergeMatch(
   body: JsonObject,
 ): string[] {
   const errors =
-    validateCommonFields(body);
+    validateRequestFields(body);
+
+  // Identity for Help Me Choose now comes from the authenticated
+  // Supabase user and customer_profiles, never from Flutter.
+  if (
+    body.customer_name !== undefined ||
+    body.phone !== undefined ||
+    body.user_id !== undefined
+  ) {
+    errors.push(
+      "concierge_match must not contain customer identity fields",
+    );
+  }
+
+  if (
+    body.share_details_consent !== undefined
+  ) {
+    errors.push(
+      "concierge_match must not contain share_details_consent",
+    );
+  }
 
   if (body.trainer_id !== undefined) {
     errors.push(
@@ -329,6 +360,173 @@ function validateConciergeMatch(
   }
 
   return errors;
+}
+async function getAuthenticatedCustomer(
+  req: Request,
+): Promise<AuthenticatedCustomer> {
+  const authorization =
+    req.headers.get("authorization");
+
+  if (
+    !authorization ||
+    !authorization.startsWith("Bearer ")
+  ) {
+    throw new Error("AUTH_REQUIRED");
+  }
+
+  const token =
+    authorization.slice(7).trim();
+
+  if (token.length === 0) {
+    throw new Error("AUTH_REQUIRED");
+  }
+
+  const {
+    data: userData,
+    error: userError,
+  } = await supabaseAdmin.auth.getUser(
+    token,
+  );
+
+  if (
+    userError ||
+    !userData.user
+  ) {
+    console.error(
+      "Auth user lookup failed:",
+      userError,
+    );
+
+    throw new Error(
+      "AUTH_REQUIRED",
+    );
+  }
+
+  const user =
+    userData.user;
+
+  const {
+    data: profile,
+    error: profileError,
+  } = await supabaseAdmin
+    .from("customer_profiles")
+    .select(
+      "full_name, phone, city",
+    )
+    .eq(
+      "id",
+      user.id,
+    )
+    .maybeSingle();
+
+  if (profileError) {
+    console.error(
+      "Customer profile query failed:",
+      {
+        message:
+          profileError.message,
+        code:
+          profileError.code,
+        details:
+          profileError.details,
+        hint:
+          profileError.hint,
+        userId:
+          user.id,
+      },
+    );
+
+    throw new Error(
+      `PROFILE_QUERY_FAILED:${profileError.message}`,
+    );
+  }
+
+  const fullName =
+    typeof profile?.full_name === "string"
+        ? profile.full_name.trim()
+        : "";
+
+  const city =
+    typeof profile?.city === "string"
+        ? profile.city.trim()
+        : "";
+
+  const authPhone =
+    typeof user.phone === "string"
+        ? user.phone.trim()
+        : "";
+
+  const profilePhone =
+    typeof profile?.phone === "string"
+        ? profile.phone.trim()
+        : "";
+
+  const phone =
+    authPhone.length > 0
+        ? authPhone
+        : profilePhone;
+
+  if (
+    profile == null ||
+    fullName.length === 0 ||
+    city.length === 0 ||
+    phone.length === 0
+  ) {
+    console.error(
+      "Customer profile is incomplete:",
+      {
+        userId: user.id,
+        profileFound: profile != null,
+        hasName: fullName.length > 0,
+        hasCity: city.length > 0,
+        hasPhone: phone.length > 0,
+      },
+    );
+
+    throw new Error(
+      "PROFILE_INCOMPLETE",
+    );
+  }
+
+  console.log(
+    "Authenticated customer loaded:",
+    {
+      userId:
+          user.id,
+      profileFound:
+          true,
+      hasName:
+          true,
+      hasCity:
+          true,
+      hasPhone:
+          true,
+    },
+  );
+
+  return {
+    userId:
+        user.id,
+    fullName,
+    phone,
+    city,
+  };
+}
+
+function attachAuthenticatedCustomer(
+  body: JsonObject,
+  customer: AuthenticatedCustomer,
+): JsonObject {
+  return {
+    ...body,
+
+    user_id: customer.userId,
+    customer_name: customer.fullName,
+    phone: customer.phone,
+
+    // Preserve the existing server-managed booking_requests field.
+    share_details_consent: true,
+  };
 }
 
 async function getActiveVerifiedTrainers():
@@ -616,41 +814,27 @@ async function validateDatabaseRules(
     typeof body.budget_max ===
       "number"
   ) {
-    const availableBudgetBands =
-      new Set<string>();
+    const budgetMin =
+      body.budget_min;
 
-    for (const trainer of trainers) {
-      const price =
-        Number(
-          trainer.price_per_session,
+    const budgetMax =
+      body.budget_max;
+
+    const trainerInBudget =
+      trainers.some((trainer) => {
+        const price =
+          Number(
+            trainer.price_per_session,
+          );
+
+        return (
+          Number.isFinite(price) &&
+          price >= budgetMin &&
+          price <= budgetMax
         );
+      });
 
-      if (
-        !Number.isFinite(price) ||
-        price < 0
-      ) {
-        continue;
-      }
-
-      const lower =
-        Math.floor(price / 100) * 100;
-
-      const upper =
-        lower + 99;
-
-      availableBudgetBands.add(
-        `${lower}-${upper}`,
-      );
-    }
-
-    const requestedBand =
-      `${body.budget_min}-${body.budget_max}`;
-
-    if (
-      !availableBudgetBands.has(
-        requestedBand,
-      )
-    ) {
+    if (!trainerInBudget) {
       errors.push(
         "budget preference is currently unavailable",
       );
@@ -698,6 +882,10 @@ function buildBookingRequestInsert(
       ...common,
       trainer_id: body.trainer_id,
     };
+  }
+
+  if (isUuid(body.user_id)) {
+    common.user_id = body.user_id;
   }
 
   // Help me choose fields
@@ -1007,10 +1195,101 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  let effectiveBody = body;
+
+  // Help Me Choose is now an authenticated flow.
+  // Customer identity comes from Supabase Auth + customer_profiles.
+  if (
+    requestType === "concierge_match"
+  ) {
+    try {
+      const customer =
+        await getAuthenticatedCustomer(
+          req,
+        );
+
+      effectiveBody =
+        attachAuthenticatedCustomer(
+          body,
+          customer,
+        );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "AUTH_REQUIRED"
+      ) {
+        return jsonResponse(
+          {
+            error:
+              "Authentication required",
+          },
+          401,
+        );
+      }
+
+      if (
+        error instanceof Error &&
+        error.message === "PROFILE_INCOMPLETE"
+      ) {
+        return jsonResponse(
+          {
+            error:
+              "Profile incomplete",
+            details: [
+              "Complete your name and city before sending the request",
+            ],
+          },
+          409,
+        );
+      }
+
+      if (
+        error instanceof Error &&
+        error.message.startsWith(
+          "PROFILE_QUERY_FAILED:",
+        )
+      ) {
+        const profileMessage =
+          error.message.replace(
+            "PROFILE_QUERY_FAILED:",
+            "",
+          );
+
+        console.error(
+          "Customer profile query failed:",
+          profileMessage,
+        );
+
+        return jsonResponse(
+          {
+            error:
+              "Unable to load customer profile",
+            details:
+              profileMessage,
+          },
+          500,
+        );
+      }
+
+      console.error(
+        "Customer profile lookup failed:",
+        error,
+      );
+
+      return jsonResponse(
+        {
+          error:
+            "Unable to load customer profile",
+        },
+        500,
+      );
+    }
+  }
+
   try {
     const databaseErrors =
       await validateDatabaseRules(
-        body,
+        effectiveBody,
         requestType,
       );
 
@@ -1042,48 +1321,72 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Temporary response.
-  // No insert and no Telegram notification yet.
-try {
-  const bookingRequest =
-    await insertBookingRequest(
-      body,
-      requestType,
-    );
-try {
-  await sendTelegramNotification(
-    body,
-    requestType,
-    bookingRequest.reference_code,
-  );
-} catch (error) {
-  console.error(
-    "Telegram notification failed:",
-    error,
-  );
-}
-  return jsonResponse(
-    {
-      success: true,
-      request_type: requestType,
-      request_id: bookingRequest.id,
-      reference_code:
-        bookingRequest.reference_code,
-    },
-    201,
-  );
-} catch (error) {
-  console.error(
-    "Booking request insert failed:",
-    error,
-  );
+  try {
+    const bookingRequest =
+      await insertBookingRequest(
+        effectiveBody,
+        requestType,
+      );
 
-  return jsonResponse(
-    {
-      error:
-        "Unable to create request",
-    },
-    500,
-  );
-}
+    try {
+      await sendTelegramNotification(
+        effectiveBody,
+        requestType,
+        bookingRequest.reference_code,
+      );
+    } catch (error) {
+      console.error(
+        "Telegram notification failed:",
+        error,
+      );
+    }
+
+    return jsonResponse(
+      {
+        success: true,
+        request_type: requestType,
+        request_id: bookingRequest.id,
+        reference_code:
+          bookingRequest.reference_code,
+      },
+      201,
+    );
+  } catch (error) {
+    console.error(
+      "Booking request insert failed:",
+      error,
+    );
+
+    const databaseError =
+      error !== null &&
+      typeof error === "object"
+        ? error as Record<string, unknown>
+        : {};
+
+    return jsonResponse(
+      {
+        error:
+          "Unable to create request",
+        details: {
+          message:
+            typeof databaseError.message === "string"
+              ? databaseError.message
+              : String(error),
+          code:
+            typeof databaseError.code === "string"
+              ? databaseError.code
+              : null,
+          details:
+            typeof databaseError.details === "string"
+              ? databaseError.details
+              : null,
+          hint:
+            typeof databaseError.hint === "string"
+              ? databaseError.hint
+              : null,
+        },
+      },
+      500,
+    );
+  }
 });

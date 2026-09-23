@@ -265,17 +265,19 @@ otp_expiry = 3600
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
-enable_signup = false
+enable_signup = true
 # If enabled, users need to confirm their phone number before signing in.
-enable_confirmations = false
+enable_confirmations = true
 # Template for sending OTP to users
 template = "Your code is {{ .Code }}"
 # Controls the minimum amount of time that must pass before sending another sms otp.
 max_frequency = "5s"
 
+
 # Use pre-defined map of phone number to OTP for testing.
-# [auth.sms.test_otp]
-# 4152127777 = "123456"
+ [auth.sms.test_otp]
+ 971501234567 = "123456"
+ 971501234568 = "123456"
 
 # Configure logged in session timeouts.
 # [auth.sessions]
@@ -296,11 +298,12 @@ max_frequency = "5s"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
 [auth.sms.twilio]
-enabled = false
-account_sid = ""
-message_service_sid = ""
+enabled = true
+account_sid = "dummy"
+message_service_sid = "dummy"
 # DO NOT commit your Twilio auth token to git. Use environment variable substitution instead:
-auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
+# auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
+auth_token = "dummy"
 
 # Multi-factor-authentication is available to Supabase Pro plan.
 [auth.mfa]
@@ -432,3 +435,14 @@ entrypoint = "./functions/create-booking-request/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/create-booking-request/*.html" ]
+
+[functions.send-auth-otp]
+enabled = true
+verify_jwt = false
+import_map = "./functions/send-auth-otp/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-auth-otp/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-auth-otp/*.html" ]

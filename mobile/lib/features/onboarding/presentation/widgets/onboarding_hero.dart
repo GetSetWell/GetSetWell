@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/gsw_spacing.dart';
 import '../../../../core/widgets/common/header.dart';
-import '../widgets/onboarding_verification_badge.dart';
 
 class OnboardingHero extends StatelessWidget {
   const OnboardingHero({super.key});
@@ -13,18 +11,19 @@ class OnboardingHero extends StatelessWidget {
 
     return SizedBox(
       width: double.infinity,
-      height: screenWidth * 1.15,
+      height: screenWidth * 1.1,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Edge-to-edge background image
+          // Hero image already contains the final gradient.
           Image.asset(
             'assets/images/onboarding_hero.png',
             fit: BoxFit.cover,
             alignment: Alignment.topCenter,
           ),
 
-          // Header layered over the image
+          // Keep only the header inside the safe area.
+          // The image itself can extend behind the status bar.
           Positioned(
             top: 0,
             left: 0,
@@ -32,17 +31,10 @@ class OnboardingHero extends StatelessWidget {
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(GSWSpacing.xs, GSWSpacing.xs, GSWSpacing.xs, 0),
-                child: Header(),
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                child: const Header(showNotifications: false),
               ),
             ),
-          ),
-
-          // Verification badge layered over the image
-          Positioned(
-            left: GSWSpacing.xs,
-            bottom: GSWSpacing.xs,
-            child: const VerifiedTrainerBadge(),
           ),
         ],
       ),

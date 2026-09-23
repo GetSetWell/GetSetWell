@@ -35,7 +35,9 @@ class GSWTextField extends StatefulWidget {
     this.textInputAction,
     this.onChanged,
     this.onComplete,
+    this.onTap,
     this.enabled = true,
+    this.readOnly = false,
     this.obscureText = false,
     this.size = GSWTextFieldSize.large,
   });
@@ -60,7 +62,9 @@ class GSWTextField extends StatefulWidget {
   final ValueChanged<String>? onComplete;
 
   final bool enabled;
+  final bool readOnly;
   final bool obscureText;
+  final VoidCallback? onTap;
 
   final GSWTextFieldSize size;
 
@@ -164,7 +168,10 @@ class _GSWTextFieldState extends State<GSWTextField> {
 
             keyboardType: widget.keyboardType,
             textInputAction: widget.textInputAction,
-
+            readOnly: widget.readOnly,
+            showCursor: widget.readOnly ? false : null,
+            enableInteractiveSelection: !widget.readOnly,
+            onTap: widget.onTap,
             obscureText: widget.obscureText,
 
             cursorColor: _cursorColor,
