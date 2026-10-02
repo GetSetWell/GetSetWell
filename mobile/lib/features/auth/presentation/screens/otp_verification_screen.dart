@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:phone_numbers_parser/phone_numbers_parser.dart';
 
+import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
 import '../../data/repositories/profile_repository.dart';
@@ -143,8 +144,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       final response = await _phoneAuthService.verifyOtp(phone: widget.phone, otp: code);
 
       debugPrint('OTP USER: ${response.user?.id}');
-
       debugPrint('OTP SESSION: ${response.session != null}');
+      
+      await PushNotificationService().registerCurrentDevice();
     } catch (error) {
       debugPrint('OTP VERIFY ERROR: $error');
 

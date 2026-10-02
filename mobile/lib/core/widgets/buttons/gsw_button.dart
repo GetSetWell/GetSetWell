@@ -4,7 +4,7 @@ import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_sizes.dart';
 import 'package:mobile/core/theme/gsw_spacing.dart';
 
-enum GSWButtonVariant { primary, secondary, tertiary, disabled }
+enum GSWButtonVariant { primary, secondary, tertiary, destructive, disabled }
 
 enum GSWButtonSize { large, medium }
 
@@ -120,6 +120,7 @@ class GSWButton extends StatelessWidget {
       switch (variant) {
         case GSWButtonVariant.primary:
         case GSWButtonVariant.secondary:
+        case GSWButtonVariant.destructive:
           return GSWColors.surfaceElevated;
 
         case GSWButtonVariant.tertiary:
@@ -141,6 +142,17 @@ class GSWButton extends StatelessWidget {
         }
 
         return GSWColors.primary;
+
+      case GSWButtonVariant.destructive:
+        if (states.contains(WidgetState.pressed)) {
+          return GSWColors.error.withValues(alpha: 0.85);
+        }
+
+        if (states.contains(WidgetState.hovered)) {
+          return GSWColors.error.withValues(alpha: 0.92);
+        }
+
+        return GSWColors.error;
 
       case GSWButtonVariant.secondary:
         if (states.contains(WidgetState.pressed)) {
@@ -232,6 +244,9 @@ class GSWButton extends StatelessWidget {
       case GSWButtonVariant.tertiary:
         return GSWColors.primary;
 
+      case GSWButtonVariant.destructive:
+        return GSWColors.textInverse;
+
       case GSWButtonVariant.disabled:
         return GSWColors.textTertiary;
     }
@@ -251,6 +266,9 @@ class GSWButton extends StatelessWidget {
 
       case GSWButtonVariant.tertiary:
         return GSWColors.primary;
+
+      case GSWButtonVariant.destructive:
+        return GSWColors.textInverse;
 
       case GSWButtonVariant.disabled:
         return GSWColors.textTertiary;
@@ -304,6 +322,7 @@ class GSWButton extends StatelessWidget {
     if (states.contains(WidgetState.pressed)) {
       switch (variant) {
         case GSWButtonVariant.primary:
+        case GSWButtonVariant.destructive:
           return GSWColors.surfaceElevated.withValues(alpha: 0.08);
 
         case GSWButtonVariant.secondary:

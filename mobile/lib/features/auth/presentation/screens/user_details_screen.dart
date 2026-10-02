@@ -8,7 +8,11 @@ import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
 import '../../data/repositories/profile_repository.dart';
 
 class UserDetailsScreen extends StatefulWidget {
-  const UserDetailsScreen({super.key, required this.intent, required this.onCompleted});
+  const UserDetailsScreen({
+    super.key,
+    required this.intent,
+    required this.onCompleted,
+  });
 
   final AuthFlowIntent intent;
   final Future<void> Function() onCompleted;
@@ -131,7 +135,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
           children: [
             Expanded(
               child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(overscroll: false),
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
@@ -140,14 +146,18 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
                     children: [
                       Text(
                         'ALMOST THERE',
-                        style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+                        style: GSWTextStyles.displaySmall.copyWith(
+                          color: GSWColors.textPrimary,
+                        ),
                       ),
 
                       const SizedBox(height: 16),
 
                       Text(
                         'Your name and city, so your trainer knows who they are meeting.',
-                        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                        style: GSWTextStyles.bodyMedium.copyWith(
+                          color: GSWColors.textSecondary,
+                        ),
                       ),
 
                       const SizedBox(height: 32),
@@ -174,7 +184,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
                       Text(
                         'City',
-                        style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
+                        style: GSWTextStyles.labelMedium.copyWith(
+                          color: GSWColors.textSecondary,
+                        ),
                       ),
 
                       const SizedBox(height: 8),
@@ -209,7 +221,11 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
     );
   }
 
-  Widget _buildCityOption({required String city, bool selected = false, bool soon = false}) {
+  Widget _buildCityOption({
+    required String city,
+    bool selected = false,
+    bool soon = false,
+  }) {
     return Expanded(
       child: Container(
         height: 44,
@@ -231,7 +247,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
               Text(
                 city,
                 style: GSWTextStyles.labelLarge.copyWith(
-                  color: selected ? GSWColors.textInverse : GSWColors.textTertiary,
+                  color: selected
+                      ? GSWColors.textInverse
+                      : GSWColors.textTertiary,
                 ),
               ),
 
@@ -240,7 +258,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
                 Text(
                   'Soon',
-                  style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
+                  style: GSWTextStyles.bodySmall.copyWith(
+                    color: GSWColors.textTertiary,
+                  ),
                 ),
               ],
             ],
@@ -255,7 +275,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: GSWButton(
         size: GSWButtonSize.large,
-        variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+        variant: _canContinue
+            ? GSWButtonVariant.primary
+            : GSWButtonVariant.disabled,
         label: _buttonLabel,
         onPressed: _canContinue ? _continue : null,
       ),

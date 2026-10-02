@@ -22,7 +22,7 @@ class _LegalAgreementTextState extends State<LegalAgreementText> {
 
     _termsRecognizer = TapGestureRecognizer()
       ..onTap = () {
-        context.push(GSWRoutes.terms);
+        context.push(GSWRoutes.termsOfService);
       };
 
     _privacyRecognizer = TapGestureRecognizer()
@@ -45,20 +45,28 @@ class _LegalAgreementTextState extends State<LegalAgreementText> {
         children: [
           TextSpan(
             text: 'By continuing you agree to our ',
-            style: GSWTextStyles.labelSmall.copyWith(color: GSWColors.textTertiary),
+            style: GSWTextStyles.labelSmall.copyWith(
+              color: GSWColors.textTertiary,
+            ),
           ),
           TextSpan(
             text: 'Terms of Service ',
-            style: GSWTextStyles.labelSmall.copyWith(color: GSWColors.textAccent),
+            style: GSWTextStyles.labelSmall.copyWith(
+              color: GSWColors.textAccent,
+            ),
             recognizer: _termsRecognizer,
           ),
           TextSpan(
             text: 'and ',
-            style: GSWTextStyles.labelSmall.copyWith(color: GSWColors.textTertiary),
+            style: GSWTextStyles.labelSmall.copyWith(
+              color: GSWColors.textTertiary,
+            ),
           ),
           TextSpan(
             text: 'Privacy Policy',
-            style: GSWTextStyles.labelSmall.copyWith(color: GSWColors.textAccent),
+            style: GSWTextStyles.labelSmall.copyWith(
+              color: GSWColors.textAccent,
+            ),
             recognizer: _privacyRecognizer,
           ),
           TextSpan(text: '.'),

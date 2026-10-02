@@ -34,9 +34,9 @@ class GSWColors {
 
   // Text
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFF82888F);
+  static const Color textSecondary = Color(0xFF969CA1);
   static const Color textInverse = Color(0xff000D1B);
-  static const Color textTertiary = Color(0xFF586169);
+  static const Color textTertiary = Color(0xFF82888F);
   static const Color textDisabled = Color(0xFF2E3944);
   static const Color textAccent = Color(0xFFDAE64B);
 
@@ -60,4 +60,5 @@ class GSWColors {
 
   // Neutral
   static const Color neutral400 = Color(0xFF6D747C);
+  static const Color neutral700 = Color(0xFF2E3944);
 }

@@ -39,7 +39,10 @@ class Header extends StatelessWidget {
               GSWIcons.bell,
               width: GSWSizes.sm,
               height: GSWSizes.sm,
-              colorFilter: const ColorFilter.mode(GSWColors.iconPrimary, BlendMode.srcIn),
+              colorFilter: const ColorFilter.mode(
+                GSWColors.iconPrimary,
+                BlendMode.srcIn,
+              ),
             ),
           ),
 

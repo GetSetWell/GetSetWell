@@ -6,6 +6,7 @@ import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
+import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_specialty_card.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_summary.dart';
@@ -20,18 +21,36 @@ class TrainerProfileScreen extends StatelessWidget {
 
   final Trainer trainer;
 
+  double get _sessionRate {
+    return trainer.pricePerSession?.toDouble() ?? 0;
+  }
+
+  double get _serviceFee {
+    return _sessionRate * 0.05;
+  }
+
+  double get _totalPrice {
+    return _sessionRate + _serviceFee;
+  }
+
+  String _formatMoney(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+
+    return value.toStringAsFixed(2);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
-
       body: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Hero image with back button
               _buildHero(context),
 
               Padding(
@@ -39,23 +58,17 @@ class TrainerProfileScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Trainer name and price information
-                    TrainerNameAndPrice(
-                      name: trainer.fullName,
-                      service: trainer.primaryService ?? '',
-                      price: trainer.pricePerSession ?? 0,
-                    ),
+                    _buildTrainerSummary(context),
 
                     const SizedBox(height: 12),
 
-                    // Trainer's location
                     TrainerLocation(location: trainer.serviceArea ?? 'Dubai'),
 
                     const SizedBox(height: 12),
 
-                    // Language pills
                     Wrap(
                       spacing: 6,
+                      runSpacing: 6,
                       children: trainer.languages
                           .map((language) => TrainerLanguagePill(label: language))
                           .toList(),
@@ -63,7 +76,6 @@ class TrainerProfileScreen extends StatelessWidget {
 
                     const SizedBox(height: 24),
 
-                    // Verification Row
                     TrainerVerificationRow(
                       onTap: () {
                         TrainerVerificationSheet.show(
@@ -76,22 +88,18 @@ class TrainerProfileScreen extends StatelessWidget {
 
                     const SizedBox(height: 24),
 
-                    // A good fit if
                     _buildGoodFitSection(context),
 
                     const SizedBox(height: 24),
 
-                    // Specialities
                     _buildSpecialties(context),
 
                     const SizedBox(height: 24),
 
-                    // How session works
                     _buildSessionDetails(context),
 
                     const SizedBox(height: 24),
 
-                    // About
                     _buildAbout(context),
 
                     const SizedBox(height: 24),
@@ -105,6 +113,10 @@ class TrainerProfileScreen extends StatelessWidget {
       bottomNavigationBar: _buildBookingFooter(context),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // HERO
+  // ---------------------------------------------------------------------------
 
   Widget _buildHero(BuildContext context) {
     return SizedBox(
@@ -120,7 +132,6 @@ class TrainerProfileScreen extends StatelessWidget {
               alignment: Alignment.topCenter,
             ),
 
-          // Fade image into page background
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -132,7 +143,6 @@ class TrainerProfileScreen extends StatelessWidget {
             ),
           ),
 
-          // Back button
           SafeArea(
             child: Align(
               alignment: Alignment.topLeft,
@@ -147,7 +157,9 @@ class TrainerProfileScreen extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.4),
                   ),
                   child: IconButton(
-                    onPressed: () => context.pop(),
+                    onPressed: () {
+                      context.pop();
+                    },
                     icon: SvgPicture.asset(
                       GSWIcons.arrowheadLeft,
                       width: 30,
@@ -163,6 +175,64 @@ class TrainerProfileScreen extends StatelessWidget {
       ),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // TRAINER SUMMARY
+  // ---------------------------------------------------------------------------
+
+  Widget _buildTrainerSummary(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                trainer.fullName.toUpperCase(),
+                style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+              ),
+
+              const SizedBox(height: 4),
+
+              Text(
+                trainer.primaryService ?? '',
+                style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(width: 16),
+
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              'AED ${_formatMoney(_sessionRate)}',
+              style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textAccent),
+            ),
+
+            Text(
+              '/session',
+              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+            ),
+
+            const SizedBox(height: 2),
+
+            Text(
+              'AED ${_formatMoney(_totalPrice)} total',
+              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // GOOD FIT
+  // ---------------------------------------------------------------------------
 
   Widget _buildGoodFitSection(BuildContext context) {
     if (trainer.fitPoints.isEmpty) {
@@ -218,6 +288,10 @@ class TrainerProfileScreen extends StatelessWidget {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // SPECIALITIES
+  // ---------------------------------------------------------------------------
+
   String _specialtyIcon(String slug) {
     switch (slug) {
       case 'beginner-yoga':
@@ -236,19 +310,19 @@ class TrainerProfileScreen extends StatelessWidget {
         return GSWIcons.dumbell;
 
       case 'muscle-building':
-        return GSWIcons.coreStrength;
+        return GSWIcons.muscleBuilding;
 
       case 'conditioning':
-        return GSWIcons.coreStrength;
+        return GSWIcons.conditioning;
 
       case 'fat-loss':
-        return GSWIcons.coreStrength;
+        return GSWIcons.fatLoss;
 
       case 'functional-training':
-        return GSWIcons.coreStrength;
+        return GSWIcons.functionalTraining;
 
       case 'general-fitness':
-        return GSWIcons.coreStrength;
+        return GSWIcons.generalFitness;
 
       default:
         return GSWIcons.yoga;
@@ -295,6 +369,10 @@ class TrainerProfileScreen extends StatelessWidget {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // SESSION DETAILS
+  // ---------------------------------------------------------------------------
+
   Widget _buildSessionDetails(BuildContext context) {
     final hasSessionDetails =
         trainer.sessionDurationMinutes != null ||
@@ -336,6 +414,7 @@ class TrainerProfileScreen extends StatelessWidget {
 
               if (trainer.sessionLocations != null) ...[
                 const SizedBox(height: 8),
+
                 TrainerSessionDetailRow(
                   iconPath: GSWIcons.location,
                   text: trainer.sessionLocations!,
@@ -344,22 +423,29 @@ class TrainerProfileScreen extends StatelessWidget {
 
               if (trainer.sessionScheduleNote != null) ...[
                 const SizedBox(height: 8),
+
                 TrainerSessionDetailRow(
                   iconPath: GSWIcons.calendar,
                   text: trainer.sessionScheduleNote!,
                 ),
               ],
 
-              if (trainer.paymentNote != null) ...[
-                const SizedBox(height: 8),
-                TrainerSessionDetailRow(iconPath: GSWIcons.cash, text: trainer.paymentNote!),
-              ],
+              const SizedBox(height: 8),
+
+              const TrainerSessionDetailRow(
+                iconPath: GSWIcons.cash,
+                text: 'Paid in the app when you book, plus a 5% service fee',
+              ),
             ],
           ),
         ),
       ],
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // ABOUT
+  // ---------------------------------------------------------------------------
 
   Widget _buildAbout(BuildContext context) {
     if (trainer.bio == null || trainer.bio!.trim().isEmpty) {
@@ -375,11 +461,15 @@ class TrainerProfileScreen extends StatelessWidget {
 
         Text(
           trainer.bio!,
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
         ),
       ],
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // BOOKING FOOTER
+  // ---------------------------------------------------------------------------
 
   Widget _buildBookingFooter(BuildContext context) {
     return Container(
@@ -393,18 +483,27 @@ class TrainerProfileScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  // Price
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'AED ${trainer.pricePerSession?.toInt() ?? 0}',
+                        'AED ${_formatMoney(_sessionRate)}',
                         style: Theme.of(
                           context,
                         ).textTheme.headlineSmall?.copyWith(color: GSWColors.textAccent),
                       ),
+
                       Text(
                         '/session',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
+                      ),
+
+                      const SizedBox(height: 2),
+
+                      Text(
+                        'AED ${_formatMoney(_totalPrice)} total',
                         style: Theme.of(
                           context,
                         ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
@@ -413,16 +512,18 @@ class TrainerProfileScreen extends StatelessWidget {
                   ),
 
                   const SizedBox(width: 24),
+
                   Expanded(
-                    child:
-                        // CTA
-                        GSWButton(
-                          size: GSWButtonSize.medium,
-                          label: 'Request a session',
-                          onPressed: () {
-                            context.push(GSWRoutes.bookingRequest, extra: trainer);
-                          },
-                        ),
+                    child: GSWButton(
+                      size: GSWButtonSize.medium,
+                      label: 'Book a session',
+                      onPressed: () {
+                        context.push(
+                          GSWRoutes.bookingRequest,
+                          extra: BookingRequestRouteData(trainer: trainer),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -430,7 +531,7 @@ class TrainerProfileScreen extends StatelessWidget {
               const SizedBox(height: 8),
 
               Text(
-                'No account needed  •  No payment now  •  A person replies on WhatsApp',
+                'Session fee refunded if you cancel 24 hours or more before',
                 textAlign: TextAlign.center,
                 style:
                     (Theme.of(context).extension<GSWTypography>()?.labelExtraSmall ??

@@ -59,7 +59,10 @@ class _SplashScreenState extends State<SplashScreen> {
               offset: _moveLogo ? const Offset(0, -0.25) : Offset.zero,
               duration: const Duration(seconds: 1),
               curve: Curves.easeOutCubic,
-              child: Image.asset('assets/logos/splash_logo_flutter.png', width: 100),
+              child: Image.asset(
+                'assets/logos/splash_logo_flutter.png',
+                width: 100,
+              ),
             ),
 
             AnimatedOpacity(

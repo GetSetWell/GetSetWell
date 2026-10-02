@@ -58,7 +58,12 @@ class _DashedBorderPainter extends CustomPainter {
     final rect = Offset.zero & size;
 
     final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(rect.deflate(strokeWidth / 2), Radius.circular(radius)));
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          rect.deflate(strokeWidth / 2),
+          Radius.circular(radius),
+        ),
+      );
 
     for (final metric in path.computeMetrics()) {
       double distance = 0;

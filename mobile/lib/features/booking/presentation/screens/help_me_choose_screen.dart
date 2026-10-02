@@ -10,13 +10,16 @@ import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
+import 'package:mobile/features/auth/presentation/navigation/auth_flow_resolver.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/training_location.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HelpMeChooseScreen extends StatefulWidget {
-  const HelpMeChooseScreen({super.key});
+  const HelpMeChooseScreen({super.key, this.requireAuth = false});
+
+  final bool requireAuth;
 
   @override
   State<HelpMeChooseScreen> createState() => _HelpMeChooseScreenState();
@@ -226,7 +229,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     });
   }
 
-  void _continueToAuth() {
+  Future<void> _continueFromHelpMeChoose() async {
     final draft = ConciergeMatchPayload(
       goal: _selectedGoal!,
       preferredDays: _selectedDays.toList(),
@@ -241,7 +244,30 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       message: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
     );
 
-    context.push(GSWRoutes.userAuth, extra: AuthFlowIntent.conciergeMatch(draft));
+    final intent = AuthFlowIntent.conciergeMatch(draft);
+    final session = Supabase.instance.client.auth.currentSession;
+
+    // Onboarding must always verify the phone number,
+    // even if an old Supabase session still exists.
+    if (widget.requireAuth) {
+      if (!mounted) return;
+
+      context.push(GSWRoutes.userAuth, extra: intent);
+
+      return;
+    }
+
+    // Signed-in users already have a verified identity.
+    // Skip phone + OTP and continue directly with the concierge request.
+    if (session != null) {
+      await resolveAuthFlow(context, intent);
+      return;
+    }
+
+    // Signed-out users still follow the normal phone -> OTP auth flow.
+    if (!mounted) return;
+
+    context.push(GSWRoutes.userAuth, extra: intent);
   }
 
   // ---------------------------------------------------------------------------
@@ -1018,7 +1044,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                 onPressed: !_canContinue
                     ? null
                     : _currentStep == 4
-                    ? _continueToAuth
+                    ? _continueFromHelpMeChoose
                     : _goNext,
               ),
             ],

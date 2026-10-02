@@ -68,29 +68,36 @@ class Trainer {
       }
     }
 
-    final verificationData = (json['trainer_verification_checks'] as List<dynamic>?) ?? [];
+    final verificationData =
+        (json['trainer_verification_checks'] as List<dynamic>?) ?? [];
 
     final verificationChecks =
         verificationData
             .map(
-              (item) => TrainerVerificationCheck.fromJson(Map<String, dynamic>.from(item as Map)),
+              (item) => TrainerVerificationCheck.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
             )
             .toList()
           ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
 
-    final trainerSpecialties = (json['trainer_specialties'] as List<dynamic>?) ?? [];
+    final trainerSpecialties =
+        (json['trainer_specialties'] as List<dynamic>?) ?? [];
 
     final specialties = trainerSpecialties
         .map((item) {
           final specialtyData = Map<String, dynamic>.from(item as Map);
 
-          final specialty = specialtyData['specialties'] as Map<String, dynamic>?;
+          final specialty =
+              specialtyData['specialties'] as Map<String, dynamic>?;
 
           if (specialty == null) {
             return null;
           }
 
-          return TrainerSpecialty.fromJson(Map<String, dynamic>.from(specialty));
+          return TrainerSpecialty.fromJson(
+            Map<String, dynamic>.from(specialty),
+          );
         })
         .whereType<TrainerSpecialty>()
         .toList();
@@ -99,7 +106,11 @@ class Trainer {
 
     final fitPoints =
         fitPointData
-            .map((item) => TrainerFitPoint.fromJson(Map<String, dynamic>.from(item as Map)))
+            .map(
+              (item) => TrainerFitPoint.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
             .toList()
           ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
 

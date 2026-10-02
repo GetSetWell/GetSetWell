@@ -38,7 +38,9 @@ class NotificationsScreen extends StatelessWidget {
                           height: 46,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: GSWColors.borderSecondary),
+                            border: Border.all(
+                              color: GSWColors.borderSecondary,
+                            ),
                             color: Colors.black.withValues(alpha: 0.4),
                           ),
                           child: IconButton(
@@ -62,21 +64,26 @@ class NotificationsScreen extends StatelessWidget {
 
                   Text(
                     'NOTIFICATIONS',
-                    style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+                    style: GSWTextStyles.displaySmall.copyWith(
+                      color: GSWColors.textPrimary,
+                    ),
                   ),
 
                   const SizedBox(height: 24),
 
                   Text(
                     'TODAY',
-                    style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                    style: GSWTextStyles.bodySmall.copyWith(
+                      color: GSWColors.textSecondary,
+                    ),
                   ),
 
                   const SizedBox(height: 24),
 
                   _NotificationCard(
                     title: 'We picked your trainer',
-                    description: 'Arash looks like the right fit. Tap to see why.',
+                    description:
+                        'Arash looks like the right fit. Tap to see why.',
                     time: '1h ago',
                     highlighted: true,
                     onTap: () {
@@ -89,14 +96,17 @@ class NotificationsScreen extends StatelessWidget {
 
                   Text(
                     'EARLIER',
-                    style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                    style: GSWTextStyles.bodySmall.copyWith(
+                      color: GSWColors.textSecondary,
+                    ),
                   ),
 
                   const SizedBox(height: 22),
 
                   _NotificationCard(
                     title: 'Your session is confirmed',
-                    description: 'Saturday 12 September, 07:00 with Arash Vahedi',
+                    description:
+                        'Saturday 12 September, 07:00 with Arash Vahedi',
                     time: '4d ago',
                     onTap: () {
                       // Later: open session details.
@@ -107,7 +117,8 @@ class NotificationsScreen extends StatelessWidget {
 
                   _NotificationCard(
                     title: 'Confirm whether your session took place',
-                    description: 'It takes one tap and it is what pays your trainer.',
+                    description:
+                        'It takes one tap and it is what pays your trainer.',
                     time: '4d ago',
                     onTap: () {
                       // Later: open session confirmation.
@@ -156,7 +167,9 @@ class _NotificationCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
             borderRadius: BorderRadius.circular(12),
-            border: highlighted ? Border.all(color: GSWColors.primary, width: 1) : null,
+            border: highlighted
+                ? Border.all(color: GSWColors.primary, width: 1)
+                : null,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,7 +181,9 @@ class _NotificationCard extends StatelessWidget {
                     Text(
                       title,
                       style: GSWTextStyles.bodyMedium.copyWith(
-                        color: highlighted ? GSWColors.primary : GSWColors.textPrimary,
+                        color: highlighted
+                            ? GSWColors.primary
+                            : GSWColors.textPrimary,
                       ),
                     ),
 
@@ -176,7 +191,9 @@ class _NotificationCard extends StatelessWidget {
 
                     Text(
                       description,
-                      style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                      style: GSWTextStyles.bodySmall.copyWith(
+                        color: GSWColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -189,7 +206,9 @@ class _NotificationCard extends StatelessWidget {
                 child: Text(
                   time,
                   textAlign: TextAlign.right,
-                  style: GSWTextStyles.bodyExtraSmall.copyWith(color: GSWColors.textTertiary),
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(
+                    color: GSWColors.textTertiary,
+                  ),
                 ),
               ),
             ],
@@ -208,7 +227,11 @@ class _NoScrollEffectBehavior extends ScrollBehavior {
   const _NoScrollEffectBehavior();
 
   @override
-  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
     return child;
   }
 

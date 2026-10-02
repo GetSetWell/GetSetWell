@@ -10,6 +10,7 @@ class TrainerRequestPayload {
     required this.preferredArea,
     required this.shareDetailsConsent,
     this.message,
+    this.sourceConciergeRequestId,
   });
 
   final String trainerId;
@@ -25,7 +26,7 @@ class TrainerRequestPayload {
   final String preferredArea;
 
   final String? message;
-
+  final String? sourceConciergeRequestId;
   final bool shareDetailsConsent;
 
   Map<String, dynamic> toJson() {
@@ -43,9 +44,9 @@ class TrainerRequestPayload {
 
       'training_location_id': trainingLocationId,
       'preferred_area': preferredArea.trim(),
-
-      if (message != null && message!.trim().isNotEmpty)
-        'message': message!.trim(),
+      if (sourceConciergeRequestId != null && sourceConciergeRequestId!.isNotEmpty)
+        'source_concierge_request_id': sourceConciergeRequestId,
+      if (message != null && message!.trim().isNotEmpty) 'message': message!.trim(),
 
       'share_details_consent': shareDetailsConsent,
     };

@@ -1,4 +1,3 @@
-
 class TrainingLocation {
   const TrainingLocation({
     required this.id,

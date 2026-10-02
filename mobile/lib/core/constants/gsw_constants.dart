@@ -5,5 +5,3 @@ class GSWConstants {
 
   static const Duration splashDuration = Duration(milliseconds: 30);
 }
-
-

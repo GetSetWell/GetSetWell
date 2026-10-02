@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "904111339580",
+    "project_id": "getsetwell-prod-510013",
+    "storage_bucket": "getsetwell-prod-510013.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:904111339580:android:b1e90072a4c4bb883c6b39",
+        "android_client_info": {
+          "package_name": "com.getsetwell.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBv3KgQqSQW9DfNludd3rUyYrKTm857dqs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

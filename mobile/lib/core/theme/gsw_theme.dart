@@ -23,32 +23,36 @@ class GSWTheme {
         onError: Colors.white,
       ),
 
-      textTheme: const TextTheme(
-        //display
-        displayLarge: GSWTextStyles.displayLarge,
-        displayMedium: GSWTextStyles.displayMedium,
-        displaySmall: GSWTextStyles.displaySmall,
+      textTheme:
+          const TextTheme(
+            //display
+            displayLarge: GSWTextStyles.displayLarge,
+            displayMedium: GSWTextStyles.displayMedium,
+            displaySmall: GSWTextStyles.displaySmall,
 
-        //headings
-        headlineLarge: GSWTextStyles.headingLarge,
-        headlineMedium: GSWTextStyles.headingMedium,
-        headlineSmall: GSWTextStyles.headingSmall,
+            //headings
+            headlineLarge: GSWTextStyles.headingLarge,
+            headlineMedium: GSWTextStyles.headingMedium,
+            headlineSmall: GSWTextStyles.headingSmall,
 
-        //title
-        titleLarge: GSWTextStyles.titleLarge,
-        titleMedium: GSWTextStyles.titleMedium,
-        titleSmall: GSWTextStyles.titleSmall,
+            //title
+            titleLarge: GSWTextStyles.titleLarge,
+            titleMedium: GSWTextStyles.titleMedium,
+            titleSmall: GSWTextStyles.titleSmall,
 
-        //body
-        bodyLarge: GSWTextStyles.bodyLarge,
-        bodyMedium: GSWTextStyles.bodyMedium,
-        bodySmall: GSWTextStyles.bodySmall,
+            //body
+            bodyLarge: GSWTextStyles.bodyLarge,
+            bodyMedium: GSWTextStyles.bodyMedium,
+            bodySmall: GSWTextStyles.bodySmall,
 
-        //label
-        labelLarge: GSWTextStyles.labelLarge,
-        labelMedium: GSWTextStyles.labelMedium,
-        labelSmall: GSWTextStyles.labelSmall,
-      ).apply(bodyColor: GSWColors.textPrimary, displayColor: GSWColors.textPrimary),
+            //label
+            labelLarge: GSWTextStyles.labelLarge,
+            labelMedium: GSWTextStyles.labelMedium,
+            labelSmall: GSWTextStyles.labelSmall,
+          ).apply(
+            bodyColor: GSWColors.textPrimary,
+            displayColor: GSWColors.textPrimary,
+          ),
     );
   }
 }

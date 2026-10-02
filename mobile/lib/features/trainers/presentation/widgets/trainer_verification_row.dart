@@ -28,7 +28,10 @@ class TrainerVerificationRow extends StatelessWidget {
               GSWIcons.verified,
               width: GSWSizes.icon,
               height: GSWSizes.icon,
-              colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+              colorFilter: const ColorFilter.mode(
+                GSWColors.iconAccent,
+                BlendMode.srcIn,
+              ),
             ),
             const SizedBox(width: 8),
 
@@ -47,7 +50,10 @@ class TrainerVerificationRow extends StatelessWidget {
               GSWIcons.arrowheadDown,
               width: GSWSizes.icon,
               height: GSWSizes.icon,
-              colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+              colorFilter: const ColorFilter.mode(
+                GSWColors.iconAccent,
+                BlendMode.srcIn,
+              ),
             ),
           ],
         ),

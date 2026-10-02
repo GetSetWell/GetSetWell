@@ -126,6 +126,7 @@ class GSWTextStyles {
   static const TextStyle titleSmall = TextStyle(
     fontFamily: 'Outfit',
     fontSize: 20,
+    height: 1.2,
     fontWeight: FontWeight.w600,
     letterSpacing: 0,
   );

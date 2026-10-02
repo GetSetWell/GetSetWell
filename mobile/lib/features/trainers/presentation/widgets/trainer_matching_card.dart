@@ -29,9 +29,9 @@ class TrainerMatchingCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Not sure who to pick?',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleMedium?.copyWith(color: GSWColors.textPrimary),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: GSWColors.textPrimary,
+                  ),
                 ),
               ),
 
@@ -41,7 +41,10 @@ class TrainerMatchingCard extends StatelessWidget {
                 GSWIcons.helpChoose,
                 width: GSWSizes.xs,
                 height: GSWSizes.xs,
-                colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+                colorFilter: const ColorFilter.mode(
+                  GSWColors.iconAccent,
+                  BlendMode.srcIn,
+                ),
               ),
             ],
           ),
@@ -51,9 +54,10 @@ class TrainerMatchingCard extends StatelessWidget {
           Text(
             'Tell us your goal, your area and when you can train. '
             'A real person reads it and helps you narrow it down.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary, height: 1.4),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: GSWColors.textSecondary,
+              height: 1.4,
+            ),
           ),
 
           const SizedBox(height: 14),
@@ -67,7 +71,9 @@ class TrainerMatchingCard extends StatelessWidget {
                 foregroundColor: GSWColors.textPrimary,
                 backgroundColor: GSWColors.surfaceElevated,
                 side: const BorderSide(color: GSWColors.borderSecondary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(GSWRadius.full)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(GSWRadius.full),
+                ),
               ),
               child: Text(
                 'Tell us your situation',

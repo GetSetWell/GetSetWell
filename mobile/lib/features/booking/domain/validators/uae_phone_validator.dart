@@ -25,9 +25,7 @@ class UAEPhoneValidator {
   static bool isValid(String value) {
     final number = normalize(value);
 
-    return RegExp(
-      r'^(50|52|54|55|56|58)\d{7}$',
-    ).hasMatch(number);
+    return RegExp(r'^(50|52|54|55|56|58)\d{7}$').hasMatch(number);
   }
 
   static String? errorText(String value) {

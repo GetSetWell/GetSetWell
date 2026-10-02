@@ -15,7 +15,10 @@ class VerifiedTrainerBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: GSWSpacing.xxs, vertical: GSWSpacing.xxs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: GSWSpacing.xxs,
+        vertical: GSWSpacing.xxs,
+      ),
       decoration: BoxDecoration(
         color: _background,
         borderRadius: BorderRadius.circular(GSWRadius.md),
@@ -27,7 +30,10 @@ class VerifiedTrainerBadge extends StatelessWidget {
             GSWIcons.verified,
             width: GSWSizes.verifiedlogo,
             height: GSWSizes.verifiedlogo,
-            colorFilter: const ColorFilter.mode(Color(0xFFDAE64B), BlendMode.srcIn),
+            colorFilter: const ColorFilter.mode(
+              Color(0xFFDAE64B),
+              BlendMode.srcIn,
+            ),
           ),
           SizedBox(width: GSWSpacing.xxs),
           Text(

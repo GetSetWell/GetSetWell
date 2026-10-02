@@ -7,14 +7,21 @@ import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/features/trainers/domain/models/trainer_verification_check.dart';
 
 class TrainerVerificationItem {
-  const TrainerVerificationItem({required this.title, required this.description});
+  const TrainerVerificationItem({
+    required this.title,
+    required this.description,
+  });
 
   final String title;
   final String description;
 }
 
 class TrainerVerificationSheet extends StatelessWidget {
-  const TrainerVerificationSheet({super.key, required this.trainerName, required this.items});
+  const TrainerVerificationSheet({
+    super.key,
+    required this.trainerName,
+    required this.items,
+  });
 
   final String trainerName;
   final List<TrainerVerificationCheck> items;
@@ -75,14 +82,16 @@ class TrainerVerificationSheet extends StatelessWidget {
                       children: [
                         Text(
                           trainerName.toUpperCase(),
-                          style: Theme.of(
-                            context,
-                          ).textTheme.headlineLarge?.copyWith(color: GSWColors.textPrimary),
+                          style: Theme.of(context).textTheme.headlineLarge
+                              ?.copyWith(color: GSWColors.textPrimary),
                         ),
 
                         const SizedBox(height: 16),
 
-                        const Divider(height: 1, color: GSWColors.borderDisabled),
+                        const Divider(
+                          height: 1,
+                          color: GSWColors.borderDisabled,
+                        ),
 
                         const SizedBox(height: 16),
 
@@ -90,11 +99,16 @@ class TrainerVerificationSheet extends StatelessWidget {
 
                         const SizedBox(height: 16),
 
-                        ...items.map((item) => _buildVerificationItem(context, item)),
+                        ...items.map(
+                          (item) => _buildVerificationItem(context, item),
+                        ),
 
                         const SizedBox(height: 16),
 
-                        const Divider(height: 1, color: GSWColors.borderSecondary),
+                        const Divider(
+                          height: 1,
+                          color: GSWColors.borderSecondary,
+                        ),
 
                         const SizedBox(height: 16),
 
@@ -115,8 +129,15 @@ class TrainerVerificationSheet extends StatelessWidget {
                 },
                 tooltip: 'Close',
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-                icon: const Icon(Icons.close_rounded, size: 22, color: GSWColors.iconTertiary),
+                constraints: const BoxConstraints.tightFor(
+                  width: 36,
+                  height: 36,
+                ),
+                icon: const Icon(
+                  Icons.close_rounded,
+                  size: 22,
+                  color: GSWColors.iconTertiary,
+                ),
               ),
             ),
           ],
@@ -133,7 +154,10 @@ class TrainerVerificationSheet extends StatelessWidget {
           GSWIcons.verified,
           width: 20,
           height: 20,
-          colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          colorFilter: const ColorFilter.mode(
+            GSWColors.iconAccent,
+            BlendMode.srcIn,
+          ),
         ),
 
         const SizedBox(width: 8),
@@ -142,7 +166,9 @@ class TrainerVerificationSheet extends StatelessWidget {
           child: Text(
             'ID, qualifications and references checked',
             style:
-                (Theme.of(context).extension<GSWTypography>()?.titleExtraSmall ??
+                (Theme.of(
+                          context,
+                        ).extension<GSWTypography>()?.titleExtraSmall ??
                         GSWTextStyles.titleExtraSmall)
                     .copyWith(color: GSWColors.textPrimary),
           ),
@@ -151,7 +177,10 @@ class TrainerVerificationSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildVerificationItem(BuildContext context, TrainerVerificationCheck item) {
+  Widget _buildVerificationItem(
+    BuildContext context,
+    TrainerVerificationCheck item,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(left: 24, bottom: 14),
       child: Row(
@@ -161,7 +190,10 @@ class TrainerVerificationSheet extends StatelessWidget {
             width: 4,
             height: 4,
             margin: const EdgeInsets.only(top: 7, right: 10),
-            decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
+            decoration: const BoxDecoration(
+              color: GSWColors.primary,
+              shape: BoxShape.circle,
+            ),
           ),
 
           Expanded(
@@ -180,9 +212,10 @@ class TrainerVerificationSheet extends StatelessWidget {
 
                 Text(
                   item.description,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary, height: 1.35),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: GSWColors.textSecondary,
+                    height: 1.35,
+                  ),
                 ),
               ],
             ),
@@ -203,7 +236,9 @@ class TrainerVerificationSheet extends StatelessWidget {
         'What this cannot tell you: whether this trainer suits you personally, '
         'and it is not medical clearance. It narrows the uncertainty. '
         'It does not remove it.',
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: GSWColors.textPrimary),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: GSWColors.textPrimary),
       ),
     );
   }

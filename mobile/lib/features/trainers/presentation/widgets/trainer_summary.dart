@@ -65,6 +65,13 @@ class TrainerNameAndPrice extends StatelessWidget {
                 context,
               ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
             ),
+
+            Text(
+              'AED ${price.toInt() + (price.toInt() * 0.05)} total',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
+            ),
           ],
         ),
       ],

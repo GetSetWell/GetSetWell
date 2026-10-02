@@ -17,7 +17,9 @@ class TrainerLanguagePill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: GSWColors.textSecondary),
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: GSWColors.textSecondary),
       ),
     );
   }

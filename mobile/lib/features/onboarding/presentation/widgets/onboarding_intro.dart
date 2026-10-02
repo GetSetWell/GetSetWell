@@ -16,14 +16,14 @@ class OnboardingIntro extends StatelessWidget {
               TextSpan(text: 'FIND THE TRAINER\n', style: Theme.of(context).textTheme.displayLarge),
               TextSpan(text: 'WHO ', style: Theme.of(context).textTheme.displayLarge),
               TextSpan(
-                text: 'FITS YOUR\nLIFE.',
+                text: 'FITS YOUR LIFE.',
                 style: Theme.of(context).textTheme.displayLarge?.copyWith(color: GSWColors.primary),
               ),
             ],
           ),
         ),
 
-        SizedBox(height: GSWSpacing.sm),
+        SizedBox(height: GSWSpacing.xs),
 
         Text(
           'Dubai trainers, checked before they appear. Choose yourself, or let us pick.',

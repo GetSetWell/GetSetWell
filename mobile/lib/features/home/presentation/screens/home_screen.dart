@@ -5,7 +5,9 @@ import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/common/header.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
+import 'package:mobile/features/booking/data/services/active_concierge_match_service.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_card.dart';
+import 'package:mobile/features/trainers/presentation/widgets/trainer_matching_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../trainers/data/repositories/trainer_repository.dart';
@@ -21,8 +23,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final SupabaseClient _client;
   late final TrainerRepository _trainerRepository;
-  late final Future<List<Trainer>> _trainersFuture;
+  late final Future<List<Trainer>> _featuredTrainersFuture;
   late Future<_HomeData> _homeDataFuture;
+  late final ActiveConciergeMatchService _activeConciergeMatchService;
+
+  late Future<bool> _hasActiveMatchFuture;
 
   @override
   void initState() {
@@ -30,8 +35,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _client = Supabase.instance.client;
     _trainerRepository = TrainerRepository(_client);
-    _trainersFuture = _trainerRepository.getTrainers();
+    _featuredTrainersFuture = _trainerRepository.getFeaturedTrainers();
+    _activeConciergeMatchService = ActiveConciergeMatchService(_client);
+
     _homeDataFuture = _loadHomeData();
+    _hasActiveMatchFuture = _activeConciergeMatchService.hasActiveMatch();
   }
 
   @override
@@ -78,17 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                       _buildGreeting(homeData),
 
-                      const SizedBox(height: 32),
-
-                      // If any concierge request is still active, keep its
-                      // tracking card visible. Otherwise show the entry point
-                      // for a new Help Me Choose request.
-                      if (primaryRequest != null)
-                        _buildRequestReviewCard(primaryRequest)
-                      else
-                        _buildStartRequestCard(homeData),
-
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
 
                       _buildFeaturedHeader(),
 
@@ -108,15 +106,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refreshHomeData() async {
-    final future = _loadHomeData();
+    final homeFuture = _loadHomeData();
+    final activeMatchFuture = _activeConciergeMatchService.hasActiveMatch();
 
     if (mounted) {
       setState(() {
-        _homeDataFuture = future;
+        _homeDataFuture = homeFuture;
+        _hasActiveMatchFuture = activeMatchFuture;
       });
     }
 
-    await future;
+    await Future.wait([homeFuture, activeMatchFuture]);
   }
 
   Future<_HomeData> _loadHomeData() async {
@@ -147,7 +147,25 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final rows = await _client
           .from('booking_requests')
-          .select('id, reference_code, goal, status, created_at, trainer_id, request_type')
+          .select('''
+  id,
+  reference_code,
+  goal,
+  status,
+  created_at,
+  trainer_id,
+  request_type,
+  preferred_days,
+  preferred_time,
+  preferred_area,
+  trainer_gender_preference,
+  budget_min,
+  budget_max,
+  language_preference,
+  training_locations (
+    name
+  )
+''')
           .eq('user_id', user.id)
           .eq('request_type', 'concierge_match')
           .order('created_at', ascending: false)
@@ -164,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
         activeRequests.add(request);
       }
 
-      // Only two open Help Me Choose requests are allowed at a time.
+      // Only one open Help Me Choose requests are allowed at a time.
       if (activeRequests.length > 2) {
         activeRequests.removeRange(2, activeRequests.length);
       }
@@ -250,16 +268,15 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'HELLO ${name.toUpperCase()}',
-          style: Theme.of(
-            context,
-          ).textTheme.displayLarge?.copyWith(color: GSWColors.textPrimary, height: 1),
+          'Hello ${name.toUpperCase()}',
+          style: Theme.of(context).textTheme.displaySmall?.copyWith(color: GSWColors.textPrimary),
         ),
-        const SizedBox(height: 8),
         Text(
           '$city trainers, checked before they appear.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
         ),
+        const SizedBox(height: 8),
+        _buildMatchingCardIfAllowed(),
       ],
     );
   }
@@ -281,13 +298,13 @@ class _HomeScreenState extends State<HomeScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: GSWColors.primary,
+                  color: GSWColors.surfaceInteractive,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   'Matching in progress',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: GSWColors.backgroundPrimary,
+                    color: GSWColors.textPrimary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -348,13 +365,13 @@ class _HomeScreenState extends State<HomeScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: GSWColors.primary,
+                  color: GSWColors.surfaceInteractive,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  'Match ready',
+                  'Recommendation ready',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: GSWColors.backgroundPrimary,
+                    color: GSWColors.textPrimary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -382,18 +399,10 @@ class _HomeScreenState extends State<HomeScreen> {
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.primary),
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: FilledButton(
-              onPressed: () => _openMatchedTrainer(request),
-              style: FilledButton.styleFrom(
-                backgroundColor: GSWColors.primary,
-                foregroundColor: GSWColors.backgroundPrimary,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-              ),
-              child: const Text('See your match'),
-            ),
+          GSWButton(
+            size: GSWButtonSize.medium,
+            label: 'See your match',
+            onPressed: () => _openMatchedTrainer(request),
           ),
         ],
       ),
@@ -455,105 +464,8 @@ class _HomeScreenState extends State<HomeScreen> {
             size: GSWButtonSize.medium,
             label: 'View booking',
             onPressed: () {
-              // The dedicated Sessions / Booking Detail route will replace
-              // this once that screen is built.
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Booking details screen is the next step.')),
-              );
+              context.push(GSWRoutes.sessionDetails, extra: session.id);
             },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRequestReviewCard(_HomeRequest request) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  'Your request is being reviewed',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: GSWColors.textPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Icon(Icons.auto_awesome_outlined, size: 24, color: GSWColors.primary),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${request.referenceCode}, ${_submittedLabel(request.createdAt)}. '
-            'One request at a time gets a person\'s full attention.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary, height: 1.45),
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            size: GSWButtonSize.medium,
-            variant: GSWButtonVariant.secondary,
-            label: 'See the request',
-            onPressed: () => _openRequestDetails(request),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStartRequestCard(_HomeData homeData) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Not sure who to pick?',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: GSWColors.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Tell us your goal, area and when you can train. A real person reads it and helps you narrow it down.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary, height: 1.45),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: OutlinedButton(
-              onPressed: () => _handleStartConciergeRequest(homeData),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: GSWColors.textPrimary,
-                side: const BorderSide(color: GSWColors.borderSecondary),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-              ),
-              child: const Text('Tell us your situation'),
-            ),
           ),
         ],
       ),
@@ -590,7 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildFeaturedTrainers() {
     return FutureBuilder<List<Trainer>>(
-      future: _trainersFuture,
+      future: _featuredTrainersFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -648,142 +560,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _handleStartConciergeRequest(_HomeData homeData) async {
-    if (homeData.activeRequests.length < 2) {
-      await context.push(GSWRoutes.helpMeChoose);
-
-      if (mounted) {
-        await _refreshHomeData();
-      }
-      return;
-    }
-
-    final oldestRequest = homeData.oldestActiveRequest;
-
-    if (oldestRequest == null) {
-      return;
-    }
-
-    final replace = await showDialog<bool>(
-      context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: GSWColors.surfaceElevated,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            'Two requests are already open',
-            style: Theme.of(dialogContext).textTheme.titleMedium?.copyWith(
-              color: GSWColors.textPrimary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          content: Text(
-            'You can keep your existing requests, or replace the oldest one '
-            '(${oldestRequest.referenceCode}) with a new request.',
-            style: Theme.of(
-              dialogContext,
-            ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary, height: 1.45),
-          ),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: GSWButton(
-                size: GSWButtonSize.medium,
-                variant: GSWButtonVariant.secondary,
-                label: 'Keep existing',
-                onPressed: () {
-                  Navigator.of(dialogContext).pop(false);
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: GSWButton(
-                size: GSWButtonSize.medium,
-                label: 'Replace oldest',
-                onPressed: () {
-                  Navigator.of(dialogContext).pop(true);
-                },
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (replace != true || !mounted) {
-      return;
-    }
-
-    try {
-      await _client.rpc('replace_oldest_open_concierge_request');
-
-      if (!mounted) return;
-
-      await context.push(GSWRoutes.helpMeChoose);
-
-      if (mounted) {
-        await _refreshHomeData();
-      }
-    } catch (error) {
-      debugPrint('Could not replace concierge request: $error');
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('We could not replace the previous request. Please try again.'),
-        ),
-      );
-    }
-  }
-
   void _openRequestDetails(_HomeRequest request) {
-    // Intentionally NOT routed to Notifications.
-    // Replace only this method when RequestDetailsScreen is created.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Request ${request.referenceCode} details screen is next.')),
-    );
+    context.push(GSWRoutes.conciergeRequestStatus, extra: request.id);
   }
 
-  Future<void> _openMatchedTrainer(_HomeRequest request) async {
-    final trainerId = request.trainerId;
-
-    if (trainerId == null || trainerId.isEmpty) {
-      if (mounted) {
-        context.go(GSWRoutes.browseTrainers);
-      }
-      return;
-    }
-
-    try {
-      final trainers = await _trainersFuture;
-      Trainer? matchedTrainer;
-
-      for (final trainer in trainers) {
-        if (trainer.id == trainerId) {
-          matchedTrainer = trainer;
-          break;
-        }
-      }
-
-      if (!mounted) return;
-
-      if (matchedTrainer != null) {
-        context.push(GSWRoutes.trainerProfile, extra: matchedTrainer);
-      } else {
-        context.go(GSWRoutes.browseTrainers);
-      }
-    } catch (error) {
-      debugPrint('Could not open matched trainer: $error');
-
-      if (mounted) {
-        context.go(GSWRoutes.browseTrainers);
-      }
-    }
+  void _openMatchedTrainer(_HomeRequest request) {
+    context.push(GSWRoutes.yourMatch, extra: request.id);
   }
 
   String _firstName(String? fullName) {
@@ -819,6 +601,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return '${normalized[0].toUpperCase()}${normalized.substring(1)}';
     }
+  }
+
+  Widget _buildMatchingCardIfAllowed() {
+    return FutureBuilder<bool>(
+      future: _hasActiveMatchFuture,
+      builder: (context, snapshot) {
+        // If we cannot confirm that a new request is allowed,
+        // keep the entry point hidden.
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            snapshot.hasError ||
+            snapshot.data == true) {
+          return const SizedBox.shrink();
+        }
+
+        return TrainerMatchingCard(
+          onTap: () {
+            context.push(GSWRoutes.helpMeChoose);
+          },
+        );
+      },
+    );
   }
 
   String _matchingProgressMessage(_HomeRequest request) {
@@ -952,6 +755,14 @@ class _HomeRequest {
     this.createdAt,
     this.trainerId,
     this.trainerName,
+    this.preferredDays = const [],
+    this.preferredTime,
+    this.preferredArea,
+    this.trainerPreference,
+    this.budgetMin,
+    this.budgetMax,
+    this.language,
+    this.trainingLocation,
   });
 
   final String id;
@@ -961,6 +772,14 @@ class _HomeRequest {
   final DateTime? createdAt;
   final String? trainerId;
   final String? trainerName;
+  final List<String> preferredDays;
+  final String? preferredTime;
+  final String? preferredArea;
+  final String? trainerPreference;
+  final int? budgetMin;
+  final int? budgetMax;
+  final String? language;
+  final String? trainingLocation;
 
   String get normalizedStatus => status.trim().toLowerCase();
 
@@ -985,10 +804,32 @@ class _HomeRequest {
       createdAt: createdAt,
       trainerId: trainerId,
       trainerName: trainerName ?? this.trainerName,
+      preferredDays: preferredDays,
+      preferredTime: preferredTime,
+      preferredArea: preferredArea,
+      trainerPreference: trainerPreference,
+      budgetMin: budgetMin,
+      budgetMax: budgetMax,
+      language: language,
+      trainingLocation: trainingLocation,
     );
   }
 
   factory _HomeRequest.fromJson(Map<String, dynamic> json) {
+    final rawDays = json['preferred_days'];
+
+    final days = rawDays is List
+        ? rawDays.map((day) => day.toString().trim()).where((day) => day.isNotEmpty).toList()
+        : <String>[];
+
+    final location = json['training_locations'];
+
+    String? trainingLocation;
+
+    if (location is Map) {
+      trainingLocation = location['name']?.toString().trim();
+    }
+
     return _HomeRequest(
       id: json['id']?.toString().trim() ?? '',
       referenceCode: json['reference_code']?.toString().trim().isNotEmpty == true
@@ -998,6 +839,14 @@ class _HomeRequest {
       goal: json['goal']?.toString().trim(),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       trainerId: json['trainer_id']?.toString().trim(),
+      preferredDays: days,
+      preferredTime: json['preferred_time']?.toString().trim(),
+      preferredArea: json['preferred_area']?.toString().trim(),
+      trainerPreference: json['trainer_gender_preference']?.toString().trim(),
+      budgetMin: (json['budget_min'] as num?)?.round(),
+      budgetMax: (json['budget_max'] as num?)?.round(),
+      language: json['language_preference']?.toString().trim(),
+      trainingLocation: trainingLocation,
     );
   }
 }

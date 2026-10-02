@@ -11,7 +11,9 @@ class OnboardingFooter extends StatelessWidget {
       children: [
         Text(
           'No account needed  ·  No payment now  ·  We reply on WhatsApp',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: GSWColors.textSecondary),
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: GSWColors.textSecondary),
         ),
       ],
     );

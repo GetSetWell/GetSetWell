@@ -33,11 +33,12 @@ class BookingSuccessScreen extends StatelessWidget {
               physics: const ClampingScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               child: switch (data) {
-                ConciergeMatchSuccessData conciergeData => _buildConciergeSuccess(
+                ConciergeMatchSuccessData conciergeData =>
+                  _buildConciergeSuccess(context, conciergeData),
+                TrainerRequestSuccessData trainerData => _buildTrainerSuccess(
                   context,
-                  conciergeData,
+                  trainerData,
                 ),
-                TrainerRequestSuccessData trainerData => _buildTrainerSuccess(context, trainerData),
               },
             ),
           ),
@@ -50,7 +51,10 @@ class BookingSuccessScreen extends StatelessWidget {
   // Concierge success
   // ---------------------------------------------------------------------------
 
-  Widget _buildConciergeSuccess(BuildContext context, ConciergeMatchSuccessData successData) {
+  Widget _buildConciergeSuccess(
+    BuildContext context,
+    ConciergeMatchSuccessData successData,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -64,7 +68,9 @@ class BookingSuccessScreen extends StatelessWidget {
 
         Text(
           'What happens next',
-          style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleExtraSmall.copyWith(
+            color: GSWColors.textPrimary,
+          ),
         ),
 
         const SizedBox(height: 8),
@@ -107,7 +113,10 @@ class BookingSuccessScreen extends StatelessWidget {
           GSWIcons.chatCheck,
           width: 96,
           height: 96,
-          colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          colorFilter: const ColorFilter.mode(
+            GSWColors.iconAccent,
+            BlendMode.srcIn,
+          ),
         ),
 
         const SizedBox(height: 24),
@@ -117,11 +126,15 @@ class BookingSuccessScreen extends StatelessWidget {
             children: [
               TextSpan(
                 text: 'REQUEST ',
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary),
+                style: GSWTextStyles.displayLarge.copyWith(
+                  color: GSWColors.textPrimary,
+                ),
               ),
               TextSpan(
                 text: 'SENT',
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textAccent),
+                style: GSWTextStyles.displayLarge.copyWith(
+                  color: GSWColors.textAccent,
+                ),
               ),
             ],
           ),
@@ -135,7 +148,9 @@ class BookingSuccessScreen extends StatelessWidget {
           child: Text(
             'Nothing is booked. A person will read this and you’ll be notified via app & WhatsApp.',
             textAlign: TextAlign.center,
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
         ),
       ],
@@ -156,12 +171,16 @@ class BookingSuccessScreen extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Your request',
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.titleExtraSmall.copyWith(
+                    color: GSWColors.textSecondary,
+                  ),
                 ),
               ),
               Text(
                 data.referenceCode,
-                style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textAccent),
+                style: GSWTextStyles.titleExtraSmall.copyWith(
+                  color: GSWColors.textAccent,
+                ),
               ),
             ],
           ),
@@ -232,7 +251,10 @@ class BookingSuccessScreen extends StatelessWidget {
   // Specific trainer success
   // ---------------------------------------------------------------------------
 
-  Widget _buildTrainerSuccess(BuildContext context, TrainerRequestSuccessData successData) {
+  Widget _buildTrainerSuccess(
+    BuildContext context,
+    TrainerRequestSuccessData successData,
+  ) {
     final firstName = _firstName(successData.trainerName);
 
     return Column(
@@ -248,7 +270,9 @@ class BookingSuccessScreen extends StatelessWidget {
 
         Text(
           'What happens next',
-          style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleExtraSmall.copyWith(
+            color: GSWColors.textPrimary,
+          ),
         ),
 
         const SizedBox(height: 8),
@@ -291,7 +315,10 @@ class BookingSuccessScreen extends StatelessWidget {
           GSWIcons.chatCheck,
           width: 96,
           height: 96,
-          colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          colorFilter: const ColorFilter.mode(
+            GSWColors.iconAccent,
+            BlendMode.srcIn,
+          ),
         ),
 
         const SizedBox(height: 24),
@@ -301,11 +328,15 @@ class BookingSuccessScreen extends StatelessWidget {
             children: [
               TextSpan(
                 text: 'REQUEST ',
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary),
+                style: GSWTextStyles.displayLarge.copyWith(
+                  color: GSWColors.textPrimary,
+                ),
               ),
               TextSpan(
                 text: 'SENT',
-                style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textAccent),
+                style: GSWTextStyles.displayLarge.copyWith(
+                  color: GSWColors.textAccent,
+                ),
               ),
             ],
           ),
@@ -320,7 +351,9 @@ class BookingSuccessScreen extends StatelessWidget {
             'This is not a confirmed booking. We will check '
             '$firstName’s availability and get back to you on WhatsApp.',
             textAlign: TextAlign.center,
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
         ),
       ],
@@ -342,12 +375,16 @@ class BookingSuccessScreen extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Your request',
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.titleExtraSmall.copyWith(
+                    color: GSWColors.textSecondary,
+                  ),
                 ),
               ),
               Text(
                 data.referenceCode,
-                style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textAccent),
+                style: GSWTextStyles.titleExtraSmall.copyWith(
+                  color: GSWColors.textAccent,
+                ),
               ),
             ],
           ),
@@ -360,7 +397,9 @@ class BookingSuccessScreen extends StatelessWidget {
 
           Text(
             data.trainerName,
-            style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.titleExtraSmall.copyWith(
+              color: GSWColors.textPrimary,
+            ),
           ),
 
           const SizedBox(height: 12),
@@ -416,7 +455,9 @@ class BookingSuccessScreen extends StatelessWidget {
         children: [
           Text(
             'Prefer to talk now?',
-            style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.titleExtraSmall.copyWith(
+              color: GSWColors.textPrimary,
+            ),
           ),
 
           const SizedBox(height: 8),
@@ -424,7 +465,9 @@ class BookingSuccessScreen extends StatelessWidget {
           Text(
             'Open WhatsApp and your request reference is already in the '
             'message. You do not need to explain it again.',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodySmall.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
         ],
       ),
@@ -437,15 +480,21 @@ class BookingSuccessScreen extends StatelessWidget {
         children: [
           TextSpan(
             text: 'Any questions? Email ',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
           TextSpan(
             text: 'info@getsetwell.com',
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.labelMedium.copyWith(
+              color: GSWColors.textPrimary,
+            ),
           ),
           TextSpan(
             text: ' and quote $referenceCode.',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
         ],
       ),
@@ -462,7 +511,8 @@ class BookingSuccessScreen extends StatelessWidget {
   }
 
   Future<void> _openWhatsApp(BuildContext context, String referenceCode) async {
-    final message = "Hi GetSetWell, I'm following up on request $referenceCode.";
+    final message =
+        "Hi GetSetWell, I'm following up on request $referenceCode.";
 
     final uri = Uri.https('wa.me', '/$_whatsAppNumber', {'text': message});
 
@@ -470,7 +520,9 @@ class BookingSuccessScreen extends StatelessWidget {
 
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('We could not open WhatsApp. Please try again.')),
+        const SnackBar(
+          content: Text('We could not open WhatsApp. Please try again.'),
+        ),
       );
     }
   }
@@ -494,7 +546,11 @@ class _NoScrollEffectBehavior extends ScrollBehavior {
   const _NoScrollEffectBehavior();
 
   @override
-  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
     return child;
   }
 
@@ -534,7 +590,11 @@ class _SummaryRow extends StatelessWidget {
 
         const SizedBox(width: 12),
         Expanded(
-          child: _SummaryItem(label: rightLabel, value: rightValue, highlight: highlightRight),
+          child: _SummaryItem(
+            label: rightLabel,
+            value: rightValue,
+            highlight: highlightRight,
+          ),
         ),
       ],
     );
@@ -542,7 +602,11 @@ class _SummaryRow extends StatelessWidget {
 }
 
 class _SummaryItem extends StatelessWidget {
-  const _SummaryItem({required this.label, required this.value, this.highlight = false});
+  const _SummaryItem({
+    required this.label,
+    required this.value,
+    this.highlight = false,
+  });
 
   final String label;
   final String value;
@@ -558,7 +622,9 @@ class _SummaryItem extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           softWrap: true,
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(
+            color: GSWColors.textSecondary,
+          ),
         ),
 
         const SizedBox(height: 4),
@@ -607,7 +673,8 @@ class _ConciergeNextStepsCard extends StatelessWidget {
           _NextStep(
             number: '2',
             title: 'We suggest who fits',
-            description: 'One trainer who fits best, with the session fee and why we picked them.',
+            description:
+                'One trainer who fits best, with the session fee and why we picked them.',
           ),
 
           SizedBox(height: 8),
@@ -681,7 +748,11 @@ class _TrainerNextStepsCard extends StatelessWidget {
 // -----------------------------------------------------------------------------
 
 class _NextStep extends StatelessWidget {
-  const _NextStep({required this.number, required this.title, required this.description});
+  const _NextStep({
+    required this.number,
+    required this.title,
+    required this.description,
+  });
 
   final String number;
   final String title;
@@ -702,7 +773,9 @@ class _NextStep extends StatelessWidget {
           ),
           child: Text(
             number,
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textAccent),
+            style: GSWTextStyles.labelMedium.copyWith(
+              color: GSWColors.textAccent,
+            ),
           ),
         ),
 
@@ -712,13 +785,20 @@ class _NextStep extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary)),
+              Text(
+                title,
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  color: GSWColors.textPrimary,
+                ),
+              ),
 
               const SizedBox(height: 4),
 
               Text(
                 description,
-                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  color: GSWColors.textSecondary,
+                ),
               ),
             ],
           ),

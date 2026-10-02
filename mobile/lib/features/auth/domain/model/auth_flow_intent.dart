@@ -5,7 +5,11 @@ enum AuthFlowType { home, conciergeMatch }
 enum AuthEntryPoint { getStarted, existingAccount, helpMeChoose }
 
 class AuthFlowIntent {
-  const AuthFlowIntent._({required this.type, required this.entryPoint, this.conciergePayload});
+  const AuthFlowIntent._({
+    required this.type,
+    required this.entryPoint,
+    this.conciergePayload,
+  });
 
   final AuthFlowType type;
   final AuthEntryPoint entryPoint;
@@ -15,7 +19,10 @@ class AuthFlowIntent {
     : this._(type: AuthFlowType.home, entryPoint: AuthEntryPoint.getStarted);
 
   const AuthFlowIntent.existingAccount()
-    : this._(type: AuthFlowType.home, entryPoint: AuthEntryPoint.existingAccount);
+    : this._(
+        type: AuthFlowType.home,
+        entryPoint: AuthEntryPoint.existingAccount,
+      );
 
   const AuthFlowIntent.conciergeMatch(ConciergeMatchPayload payload)
     : this._(
@@ -26,5 +33,6 @@ class AuthFlowIntent {
 
   bool get isCreatingAccount => entryPoint == AuthEntryPoint.getStarted;
 
-  bool get hasConciergeRequest => type == AuthFlowType.conciergeMatch && conciergePayload != null;
+  bool get hasConciergeRequest =>
+      type == AuthFlowType.conciergeMatch && conciergePayload != null;
 }

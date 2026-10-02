@@ -53,7 +53,11 @@ class TrainerCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  TrainerNameAndPrice(name: name, service: service, price: price),
+                  TrainerNameAndPrice(
+                    name: name,
+                    service: service,
+                    price: price,
+                  ),
 
                   const SizedBox(height: 12),
 
@@ -86,7 +90,9 @@ class TrainerCard extends StatelessWidget {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: languages.map((language) => TrainerLanguagePill(label: language)).toList(),
+      children: languages
+          .map((language) => TrainerLanguagePill(label: language))
+          .toList(),
     );
   }
 

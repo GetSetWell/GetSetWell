@@ -54,7 +54,9 @@ class _GSWCheckboxState extends State<GSWCheckbox> {
       enabled: _isEnabled,
       child: FocusableActionDetector(
         enabled: _isEnabled,
-        mouseCursor: _isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        mouseCursor: _isEnabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
         onShowFocusHighlight: (value) {
           setState(() {
             _isFocused = value;
@@ -119,8 +121,14 @@ class _GSWCheckboxState extends State<GSWCheckbox> {
                         height: widget.iconSize,
                         width: widget.iconSize,
                         colorFilter: (!_isEnabled)
-                            ? const ColorFilter.mode(GSWColors.textTertiary, BlendMode.srcIn)
-                            : const ColorFilter.mode(GSWColors.textInverse, BlendMode.srcIn),
+                            ? const ColorFilter.mode(
+                                GSWColors.textTertiary,
+                                BlendMode.srcIn,
+                              )
+                            : const ColorFilter.mode(
+                                GSWColors.textInverse,
+                                BlendMode.srcIn,
+                              ),
                       )
                     : null,
               ),
@@ -204,7 +212,11 @@ class _GSWCheckboxState extends State<GSWCheckbox> {
     }
 
     return [
-      BoxShadow(color: GSWColors.primary.withValues(alpha: 0.18), blurRadius: 0, spreadRadius: 3),
+      BoxShadow(
+        color: GSWColors.primary.withValues(alpha: 0.18),
+        blurRadius: 0,
+        spreadRadius: 3,
+      ),
     ];
   }
 }

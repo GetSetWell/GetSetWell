@@ -15,9 +15,7 @@ class TrainerVerificationCheck {
   final int displayOrder;
   final bool isVerified;
 
-  factory TrainerVerificationCheck.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory TrainerVerificationCheck.fromJson(Map<String, dynamic> json) {
     return TrainerVerificationCheck(
       id: json['id'] as String,
       title: json['title'] as String,

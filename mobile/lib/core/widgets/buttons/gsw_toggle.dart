@@ -37,7 +37,9 @@ class GSWToggle extends StatelessWidget {
                   width: 18,
                   height: 18,
                   decoration: BoxDecoration(
-                    color: value ? GSWColors.surfacePrimary : GSWColors.neutral400,
+                    color: value
+                        ? GSWColors.surfacePrimary
+                        : GSWColors.neutral400,
                     shape: BoxShape.circle,
                   ),
                 ),

@@ -82,7 +82,8 @@ class _GSWTextAreaState extends State<GSWTextArea> {
 
   bool get _isOverLimit => _characterCount > widget.maxLength;
 
-  bool get _hasExplicitError => widget.errorText != null && widget.errorText!.trim().isNotEmpty;
+  bool get _hasExplicitError =>
+      widget.errorText != null && widget.errorText!.trim().isNotEmpty;
 
   bool get _hasError => _hasExplicitError || _isOverLimit;
 
@@ -170,7 +171,10 @@ class _GSWTextAreaState extends State<GSWTextArea> {
         // LABEL
         // ---------------------------------------------------------------------
         if (widget.label != null) ...[
-          Text(widget.label!, style: GSWTextStyles.labelMedium.copyWith(color: _labelColor)),
+          Text(
+            widget.label!,
+            style: GSWTextStyles.labelMedium.copyWith(color: _labelColor),
+          ),
 
           const SizedBox(height: 8),
         ],
@@ -242,7 +246,9 @@ class _GSWTextAreaState extends State<GSWTextArea> {
                   ? const SizedBox.shrink()
                   : Text(
                       _supportingText!,
-                      style: GSWTextStyles.bodySmall.copyWith(color: _supportingTextColor),
+                      style: GSWTextStyles.bodySmall.copyWith(
+                        color: _supportingTextColor,
+                      ),
                     ),
             ),
 

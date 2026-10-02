@@ -6,5 +6,6 @@ class GSWRadius {
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 24;
-  static const double full = 9999; // A large value to represent a fully rounded corner
+  static const double full =
+      9999; // A large value to represent a fully rounded corner
 }

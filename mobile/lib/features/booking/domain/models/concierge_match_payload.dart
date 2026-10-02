@@ -36,7 +36,9 @@ class ConciergeMatchPayload {
     final json = <String, dynamic>{
       'request_type': 'concierge_match',
       'goal': goal.trim(),
-      'preferred_days': preferredDays.map((day) => day.trim().toLowerCase()).toList(),
+      'preferred_days': preferredDays
+          .map((day) => day.trim().toLowerCase())
+          .toList(),
 
       'preferred_time': preferredTime.trim().toLowerCase(),
       'training_location_id': trainingLocationId,

@@ -71,7 +71,10 @@ if (!supabaseUrl || !serviceRoleKey) {
     "Missing Supabase environment variables",
   );
 }
-
+console.log(
+  "Function SUPABASE_URL:",
+  Deno.env.get("SUPABASE_URL"),
+);
 const supabaseAdmin = createClient(
   supabaseUrl,
   serviceRoleKey,
@@ -254,7 +257,329 @@ function validateTrainerRequest(
 
   return errors;
 }
+const allowedTrainingPlaces = new Set<string>([
+  "gym",
+  "home",
+  "outdoors",
+]);
 
+const allowedVenueChoices = new Set<string>([
+  "customer_choice",
+  "trainer_private_gym",
+]);
+function validateTrainerSessionRequest(
+  body: JsonObject,
+): string[] {
+  const errors: string[] = [];
+
+  // Specific trainer is required.
+  if (!isUuid(body.trainer_id)) {
+    errors.push(
+      "trainer_id is required",
+    );
+  }
+
+  // Exact session date/time is required.
+  if (
+    typeof body.scheduled_at !== "string" ||
+    Number.isNaN(
+      Date.parse(body.scheduled_at),
+    )
+  ) {
+    errors.push(
+      "scheduled_at is invalid",
+    );
+  }
+
+  // Customer's original location preference.
+  if (
+    typeof body.customer_training_place !==
+      "string" ||
+    !allowedTrainingPlaces.has(
+      body.customer_training_place,
+    )
+  ) {
+    errors.push(
+      "customer_training_place is invalid",
+    );
+  }
+
+  // Whether they use their chosen place
+  // or the trainer's private gym.
+  if (
+    typeof body.venue_choice !==
+      "string" ||
+    !allowedVenueChoices.has(
+      body.venue_choice,
+    )
+  ) {
+    errors.push(
+      "venue_choice is invalid",
+    );
+  }
+
+  // Final human-readable session location.
+  if (
+    !isNonEmptyString(
+      body.location_label,
+      150,
+    )
+  ) {
+    errors.push(
+      "location_label is required",
+    );
+  }
+
+  // Prices sent by Flutter for now.
+  // We will verify these against trainer/backend
+  // prices in the database-validation step.
+  if (
+    typeof body.session_rate !== "number" ||
+    !Number.isFinite(
+      body.session_rate,
+    ) ||
+    body.session_rate < 0
+  ) {
+    errors.push(
+      "session_rate is invalid",
+    );
+  }
+
+  if (
+    typeof body.service_fee !== "number" ||
+    !Number.isFinite(
+      body.service_fee,
+    ) ||
+    body.service_fee < 0
+  ) {
+    errors.push(
+      "service_fee is invalid",
+    );
+  }
+
+  if (
+    typeof body.total !== "number" ||
+    !Number.isFinite(body.total) ||
+    body.total < 0
+  ) {
+    errors.push(
+      "total is invalid",
+    );
+  }
+
+  // Goal is optional in direct booking.
+  if (
+    body.goal !== undefined &&
+    body.goal !== null &&
+    !isNonEmptyString(
+      body.goal,
+      100,
+    )
+  ) {
+    errors.push(
+      "goal is invalid",
+    );
+  }
+
+  // Notes are optional.
+  if (
+    body.message !== undefined &&
+    body.message !== null
+  ) {
+    if (
+      typeof body.message !== "string" ||
+      body.message.trim().length > 250
+    ) {
+      errors.push(
+        "message must be 250 characters or fewer",
+      );
+    }
+  }
+
+  // Current dummy payment methods.
+  if (
+    body.payment_method !== "card" &&
+    body.payment_method !== "apple_pay"
+  ) {
+    errors.push(
+      "payment_method is invalid",
+    );
+  }
+
+  return errors;
+}
+async function validateTrainerSessionDatabaseRules(
+  body: JsonObject,
+): Promise<string[]> {
+  const errors: string[] = [];
+
+  const trainerId =
+    body.trainer_id as string;
+
+  const {
+    data: trainer,
+    error: trainerError,
+  } = await supabaseAdmin
+    .from("trainers")
+    .select(`
+      id,
+      is_active,
+      is_verified,
+      price_per_session,
+      gym_price_per_session,
+      gym_location_label
+    `)
+    .eq("id", trainerId)
+    .maybeSingle();
+
+  if (trainerError) {
+    throw trainerError;
+  }
+
+  if (
+    !trainer ||
+    trainer.is_active !== true ||
+    trainer.is_verified !== true
+  ) {
+    return [
+      "trainer is no longer available",
+    ];
+  }
+
+  const venueChoice =
+    body.venue_choice as string;
+
+  const customerTrainingPlace =
+    body.customer_training_place as string;
+
+  const locationLabel =
+    body.location_label as string;
+
+  const standardRate =
+    Number(
+      trainer.price_per_session,
+    );
+
+  if (
+    !Number.isFinite(standardRate) ||
+    standardRate <= 0
+  ) {
+    return [
+      "trainer session price is unavailable",
+    ];
+  }
+
+  let expectedSessionRate =
+    standardRate;
+
+  if (
+    venueChoice ===
+      "trainer_private_gym"
+  ) {
+    const gymRate =
+      Number(
+        trainer.gym_price_per_session,
+      );
+
+    const gymLocation =
+      typeof trainer.gym_location_label ===
+        "string"
+        ? trainer.gym_location_label.trim()
+        : "";
+
+    if (
+      !Number.isFinite(gymRate) ||
+      gymRate <= 0 ||
+      gymLocation.length === 0
+    ) {
+      errors.push(
+        "trainer private gym is unavailable",
+      );
+    } else {
+      expectedSessionRate =
+        gymRate;
+
+      if (
+        locationLabel.trim() !==
+        gymLocation
+      ) {
+        errors.push(
+          "trainer gym location does not match",
+        );
+      }
+    }
+  }
+
+  if (
+    venueChoice ===
+      "customer_choice" &&
+    !allowedTrainingPlaces.has(
+      customerTrainingPlace,
+    )
+  ) {
+    errors.push(
+      "customer training place is invalid",
+    );
+  }
+
+  const expectedServiceFee =
+    expectedSessionRate * 0.05;
+
+  const expectedTotal =
+    expectedSessionRate +
+    expectedServiceFee;
+
+  const submittedSessionRate =
+    Number(body.session_rate);
+
+  const submittedServiceFee =
+    Number(body.service_fee);
+
+  const submittedTotal =
+    Number(body.total);
+
+  const moneyMatches = (
+    left: number,
+    right: number,
+  ) =>
+    Math.abs(left - right) <
+    0.01;
+
+  if (
+    !moneyMatches(
+      submittedSessionRate,
+      expectedSessionRate,
+    )
+  ) {
+    errors.push(
+      "session rate does not match backend price",
+    );
+  }
+
+  if (
+    !moneyMatches(
+      submittedServiceFee,
+      expectedServiceFee,
+    )
+  ) {
+    errors.push(
+      "service fee does not match backend price",
+    );
+  }
+
+  if (
+    !moneyMatches(
+      submittedTotal,
+      expectedTotal,
+    )
+  ) {
+    errors.push(
+      "total does not match backend price",
+    );
+  }
+
+  return errors;
+}
 function validateConciergeMatch(
   body: JsonObject,
 ): string[] {
@@ -847,6 +1172,58 @@ function buildBookingRequestInsert(
   body: JsonObject,
   requestType: RequestType,
 ): JsonObject {
+    const isTrainerSessionRequest =
+    requestType === "trainer_request" &&
+    body.scheduled_at !== undefined;
+
+  if (isTrainerSessionRequest) {
+    const insertData: JsonObject = {
+      request_type:
+        "trainer_request",
+
+      user_id:
+        body.user_id,
+
+      trainer_id:
+        body.trainer_id,
+
+      customer_name:
+        body.customer_name,
+
+      phone:
+        body.phone,
+
+      share_details_consent:
+        true,
+
+      consented_at:
+        new Date().toISOString(),
+
+      status:
+        "new",
+
+      source:
+        "app",
+    };
+
+    if (
+      typeof body.goal === "string" &&
+      body.goal.trim().length > 0
+    ) {
+      insertData.goal =
+        body.goal.trim();
+    }
+
+    if (
+      typeof body.message === "string" &&
+      body.message.trim().length > 0
+    ) {
+      insertData.message =
+        body.message.trim();
+    }
+
+    return insertData;
+  }
   const common: JsonObject = {
     request_type: requestType,
 
@@ -877,12 +1254,19 @@ function buildBookingRequestInsert(
     common.message = body.message.trim();
   }
 
-  if (requestType === "trainer_request") {
-    return {
-      ...common,
-      trainer_id: body.trainer_id,
-    };
-  }
+if (requestType === "trainer_request") {
+  return {
+    ...common,
+    trainer_id: body.trainer_id,
+
+    ...(isUuid(body.source_concierge_request_id)
+      ? {
+          source_concierge_request_id:
+            body.source_concierge_request_id,
+        }
+      : {}),
+  };
+}
 
   if (isUuid(body.user_id)) {
     common.user_id = body.user_id;
@@ -938,6 +1322,136 @@ async function insertBookingRequest(
         `,
       )
       .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function useExistingConciergeRequest(
+  body: JsonObject,
+) {
+  const requestId =
+    body.source_concierge_request_id;
+
+  const userId =
+    body.user_id;
+
+  if (!isUuid(requestId) || !isUuid(userId)) {
+    throw new Error(
+      "INVALID_SOURCE_CONCIERGE_REQUEST",
+    );
+  }
+
+  const {
+    data: existingRequest,
+    error: lookupError,
+  } = await supabaseAdmin
+    .from("booking_requests")
+    .select(`
+      id,
+      reference_code,
+      request_type,
+      status,
+      user_id,
+      trainer_id
+    `)
+    .eq("id", requestId)
+    .eq("user_id", userId)
+    .eq("request_type", "concierge_match")
+    .maybeSingle();
+
+  if (lookupError) {
+    throw lookupError;
+  }
+
+  if (!existingRequest) {
+    throw new Error(
+      "SOURCE_CONCIERGE_REQUEST_NOT_FOUND",
+    );
+  }
+
+  if (
+    existingRequest.status !== "matched"
+  ) {
+    throw new Error(
+      "SOURCE_CONCIERGE_REQUEST_NOT_MATCHED",
+    );
+  }
+
+  const trainerId =
+    body.trainer_id;
+
+  if (!isUuid(trainerId)) {
+    throw new Error(
+      "INVALID_TRAINER",
+    );
+  }
+
+  const {
+    data: updatedRequest,
+    error: updateError,
+  } = await supabaseAdmin
+    .from("booking_requests")
+    .update({
+      trainer_id: trainerId,
+      status: "confirmed",
+    })
+    .eq("id", requestId)
+    .eq("user_id", userId)
+    .select(`
+      id,
+      reference_code
+    `)
+    .single();
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  return updatedRequest;
+}
+
+async function insertConfirmedSession(
+  body: JsonObject,
+  bookingRequestId: string,
+) {
+  const {
+    data,
+    error,
+  } = await supabaseAdmin
+    .from("sessions")
+    .insert({
+      booking_request_id:
+        bookingRequestId,
+
+      user_id:
+        body.user_id,
+
+      trainer_id:
+        body.trainer_id,
+
+      scheduled_at:
+        body.scheduled_at,
+
+      location_label:
+        body.location_label,
+
+      status:
+        "confirmed",
+    })
+    .select(`
+      id,
+      booking_request_id,
+      user_id,
+      trainer_id,
+      scheduled_at,
+      location_label,
+      status
+    `)
+    .single();
 
   if (error) {
     throw error;
@@ -1161,6 +1675,10 @@ Deno.serve(async (req: Request) => {
   const requestType =
     body.request_type;
 
+const isTrainerSessionRequest =
+  requestType === "trainer_request" &&
+  body.scheduled_at !== undefined;
+
   if (
     requestType !==
       "trainer_request" &&
@@ -1175,11 +1693,18 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const validationErrors =
-    requestType ===
-        "trainer_request"
-      ? validateTrainerRequest(body)
-      : validateConciergeMatch(body);
+const validationErrors =
+  requestType === "trainer_request"
+    ? isTrainerSessionRequest
+      ? validateTrainerSessionRequest(
+          body,
+        )
+      : validateTrainerRequest(
+          body,
+        )
+    : validateConciergeMatch(
+        body,
+      );
 
   if (
     validationErrors.length > 0
@@ -1200,7 +1725,9 @@ Deno.serve(async (req: Request) => {
   // Help Me Choose is now an authenticated flow.
   // Customer identity comes from Supabase Auth + customer_profiles.
   if (
-    requestType === "concierge_match"
+    requestType === "concierge_match" ||
+  isTrainerSessionRequest
+
   ) {
     try {
       const customer =
@@ -1287,8 +1814,12 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const databaseErrors =
-      await validateDatabaseRules(
+const databaseErrors =
+  isTrainerSessionRequest
+    ? await validateTrainerSessionDatabaseRules(
+        effectiveBody,
+      )
+    : await validateDatabaseRules(
         effectiveBody,
         requestType,
       );
@@ -1322,35 +1853,120 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const bookingRequest =
-      await insertBookingRequest(
-        effectiveBody,
-        requestType,
-      );
+let bookingRequest;
 
-    try {
-      await sendTelegramNotification(
+const sourceConciergeRequestId =
+  effectiveBody.source_concierge_request_id;
+
+const isConciergeBooking =
+  isTrainerSessionRequest &&
+  isUuid(sourceConciergeRequestId);
+
+if (isConciergeBooking) {
+  bookingRequest =
+    await useExistingConciergeRequest(
+      effectiveBody,
+    );
+} else {
+  bookingRequest =
+    await insertBookingRequest(
+      effectiveBody,
+      requestType,
+    );
+}
+
+let session = null;
+
+if (isTrainerSessionRequest) {
+  try {
+    session =
+      await insertConfirmedSession(
         effectiveBody,
-        requestType,
-        bookingRequest.reference_code,
+        bookingRequest.id,
       );
-    } catch (error) {
-      console.error(
-        "Telegram notification failed:",
-        error,
-      );
+  } catch (error) {
+    if (isConciergeBooking) {
+      // Restore the original concierge request if
+      // creating the session fails.
+      const {
+        error: rollbackError,
+      } = await supabaseAdmin
+        .from("booking_requests")
+        .update({
+          status: "matched",
+        })
+        .eq(
+          "id",
+          bookingRequest.id,
+        );
+
+      if (rollbackError) {
+        console.error(
+          "Concierge request rollback failed:",
+          rollbackError,
+        );
+      }
+    } else {
+      // Only delete rows that were created as part
+      // of a normal direct booking.
+      const {
+        error: cleanupError,
+      } = await supabaseAdmin
+        .from("booking_requests")
+        .delete()
+        .eq(
+          "id",
+          bookingRequest.id,
+        );
+
+      if (cleanupError) {
+        console.error(
+          "Booking request cleanup failed:",
+          cleanupError,
+        );
+      }
     }
 
-    return jsonResponse(
-      {
-        success: true,
-        request_type: requestType,
-        request_id: bookingRequest.id,
-        reference_code:
-          bookingRequest.reference_code,
-      },
-      201,
+    throw error;
+  }
+}
+if (!isTrainerSessionRequest) {
+  try {
+    await sendTelegramNotification(
+      effectiveBody,
+      requestType,
+      bookingRequest.reference_code,
     );
+  } catch (error) {
+    console.error(
+      "Telegram notification failed:",
+      error,
+    );
+  }
+}
+
+return jsonResponse(
+  {
+    success: true,
+    request_type: requestType,
+    request_id: bookingRequest.id,
+    reference_code:
+      bookingRequest.reference_code,
+
+    session_id:
+      session?.id ?? null,
+
+    scheduled_at:
+      session?.scheduled_at ?? null,
+
+    location_label:
+      session?.location_label ?? null,
+
+    status:
+      session?.status ?? null,
+  },
+  201,
+);
   } catch (error) {
     console.error(
       "Booking request insert failed:",

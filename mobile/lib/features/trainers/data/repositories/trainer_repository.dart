@@ -28,7 +28,8 @@ class TrainerRepository {
       }
     }
 
-    final result = languages.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final result = languages.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     return result;
   }
@@ -70,7 +71,9 @@ class TrainerRepository {
         .eq('is_active', true)
         .order('name');
 
-    return response.map<TrainingLocation>((row) => TrainingLocation.fromJson(row)).toList();
+    return response
+        .map<TrainingLocation>((row) => TrainingLocation.fromJson(row))
+        .toList();
   }
 
   Future<Set<String>> getAvailableSpecialtySlugs() async {
@@ -106,7 +109,9 @@ class TrainerRepository {
     return slugs;
   }
 
-  Future<List<TrainingLocation>> getTrainerTrainingLocations(String trainerId) async {
+  Future<List<TrainingLocation>> getTrainerTrainingLocations(
+    String trainerId,
+  ) async {
     final response = await _client
         .from('trainer_training_locations')
         .select('''
@@ -200,5 +205,34 @@ class TrainerRepository {
 
       return Trainer.fromJson(trainerJson);
     }).toList();
+  }
+
+  Future<List<Trainer>> getFeaturedTrainers() async {
+    final featuredRows = await _client
+        .from('trainers')
+        .select('id, featured_order')
+        .eq('is_featured', true)
+        .eq('is_active', true)
+        .eq('is_verified', true)
+        .order('featured_order', ascending: true)
+        .limit(2);
+
+    if (featuredRows.isEmpty) {
+      return [];
+    }
+
+    final featuredIds = featuredRows
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .toList();
+
+    final trainers = await getTrainers();
+
+    final trainersById = {for (final trainer in trainers) trainer.id: trainer};
+
+    return featuredIds
+        .map((id) => trainersById[id])
+        .whereType<Trainer>()
+        .toList();
   }
 }

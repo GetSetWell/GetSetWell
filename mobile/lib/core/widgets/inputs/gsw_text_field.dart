@@ -80,7 +80,8 @@ class _GSWTextFieldState extends State<GSWTextField> {
 
   bool get _hasValue => widget.controller.text.trim().isNotEmpty;
 
-  bool get _hasError => widget.errorText != null && widget.errorText!.trim().isNotEmpty;
+  bool get _hasError =>
+      widget.errorText != null && widget.errorText!.trim().isNotEmpty;
 
   // CURRENT STATE
   GSWTextFieldState get _state {
@@ -150,7 +151,10 @@ class _GSWTextFieldState extends State<GSWTextField> {
         // LABEL
         // ---------------------------------------------------------------------
         if (widget.label != null) ...[
-          Text(widget.label!, style: GSWTextStyles.labelMedium.copyWith(color: _labelColor)),
+          Text(
+            widget.label!,
+            style: GSWTextStyles.labelMedium.copyWith(color: _labelColor),
+          ),
 
           const SizedBox(height: 8),
         ],
@@ -204,19 +208,26 @@ class _GSWTextFieldState extends State<GSWTextField> {
 
               isDense: true,
 
-              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: _verticalPadding),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: _verticalPadding,
+              ),
 
               // ---------------------------------------------------------------
               // LEADING ICON
               // ---------------------------------------------------------------
-              prefixIcon: widget.leadingIcon == null ? null : _buildLeadingIcon(),
+              prefixIcon: widget.leadingIcon == null
+                  ? null
+                  : _buildLeadingIcon(),
 
               prefixIconConstraints: const BoxConstraints(minWidth: 48),
 
               // ---------------------------------------------------------------
               // TRAILING ICON
               // ---------------------------------------------------------------
-              suffixIcon: widget.trailingIcon == null ? null : _buildTrailingIcon(),
+              suffixIcon: widget.trailingIcon == null
+                  ? null
+                  : _buildTrailingIcon(),
 
               suffixIconConstraints: const BoxConstraints(minWidth: 48),
 
@@ -240,7 +251,9 @@ class _GSWTextFieldState extends State<GSWTextField> {
 
           Text(
             _supportingText!,
-            style: GSWTextStyles.bodySmall.copyWith(color: _supportingTextColor),
+            style: GSWTextStyles.bodySmall.copyWith(
+              color: _supportingTextColor,
+            ),
           ),
         ],
       ],

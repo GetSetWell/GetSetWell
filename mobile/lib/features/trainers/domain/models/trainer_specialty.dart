@@ -1,8 +1,5 @@
 class TrainerSpecialty {
-  const TrainerSpecialty({
-    required this.name,
-    required this.slug,
-  });
+  const TrainerSpecialty({required this.name, required this.slug});
 
   final String name;
   final String slug;

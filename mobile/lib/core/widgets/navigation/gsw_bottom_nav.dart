@@ -17,7 +17,9 @@ class GSWBottomNav extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         color: GSWColors.surfacePrimary,
-        border: Border(top: BorderSide(color: GSWColors.borderSecondary, width: 1)),
+        border: Border(
+          top: BorderSide(color: GSWColors.borderSecondary, width: 1),
+        ),
       ),
       child: SafeArea(
         top: false,
@@ -57,7 +59,9 @@ class GSWBottomNav extends StatelessWidget {
                   iconPath: GSWIcons.calendar,
                   isSelected: currentItem == GSWBottomNavItem.sessions,
                   onTap: () {
-                    // Add route when Sessions screen is implemented.
+                    if (currentItem != GSWBottomNavItem.sessions) {
+                      context.go(GSWRoutes.sessions);
+                    }
                   },
                 ),
               ),
@@ -68,7 +72,9 @@ class GSWBottomNav extends StatelessWidget {
                   iconPath: GSWIcons.profile,
                   isSelected: currentItem == GSWBottomNavItem.profile,
                   onTap: () {
-                    // Add route when Profile screen is implemented.
+                    if (currentItem != GSWBottomNavItem.profile) {
+                      context.go(GSWRoutes.userProfile);
+                    }
                   },
                 ),
               ),

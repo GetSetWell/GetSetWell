@@ -34,7 +34,9 @@ class OnboardingScreen extends StatelessWidget {
               SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: GSWSpacing.xs),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: GSWSpacing.xs,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -49,7 +51,7 @@ class OnboardingScreen extends StatelessWidget {
                         size: GSWButtonSize.large,
                         label: 'Help me choose',
                         onPressed: () {
-                          context.push(GSWRoutes.helpMeChoose);
+                          context.push(GSWRoutes.helpMeChoose, extra: true);
                         },
                       ),
 

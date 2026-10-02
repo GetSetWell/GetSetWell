@@ -29,7 +29,7 @@ class GSWFilterChip extends StatelessWidget {
       duration: const Duration(milliseconds: 160),
       padding: const EdgeInsets.symmetric(horizontal: 18),
       decoration: BoxDecoration(
-        color: isSelected ? GSWColors.primary : GSWColors.surfacePrimary,
+        color: isSelected ? GSWColors.primary : GSWColors.backgroundPrimary,
         borderRadius: BorderRadius.circular(GSWRadius.full),
 
         // Normal enabled filters use a solid border.

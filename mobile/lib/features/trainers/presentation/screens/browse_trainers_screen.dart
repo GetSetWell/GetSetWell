@@ -6,7 +6,9 @@ import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:mobile/core/widgets/common/header.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
+import 'package:mobile/features/booking/data/services/active_concierge_match_service.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_card.dart';
+import 'package:mobile/features/trainers/presentation/widgets/trainer_filters_bottom_sheet.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_matching_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -25,6 +27,8 @@ class _TrainerCategory {
   final bool isComingSoon;
 }
 
+TrainerFilters _trainerFilters = const TrainerFilters();
+
 class BrowseTrainersScreen extends StatefulWidget {
   const BrowseTrainersScreen({super.key});
 
@@ -35,6 +39,8 @@ class BrowseTrainersScreen extends StatefulWidget {
 class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
   bool _showFemaleOnly = false;
   late final TrainerRepository _trainerRepository;
+  late final ActiveConciergeMatchService _activeConciergeMatchService;
+
   late final Future<List<Trainer>> _trainersFuture;
   String _selectedCategory = 'All';
 
@@ -56,8 +62,10 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
   @override
   void initState() {
     super.initState();
+    final client = Supabase.instance.client;
 
     _trainerRepository = TrainerRepository(Supabase.instance.client);
+    _activeConciergeMatchService = ActiveConciergeMatchService(client);
 
     _trainersFuture = _trainerRepository.getTrainers();
   }
@@ -92,7 +100,16 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
                 _buildCategoryFilters(context),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+
+                Text(
+                  "Prices are the trainer's rate. A 5% service fee is added when you book.",
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary, height: 1.4),
+                ),
+
+                const SizedBox(height: 16),
 
                 // Trainer cards...
                 _buildTrainerList(),
@@ -206,32 +223,140 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
     );
   }
 
+  Future<void> _openFilters() async {
+    try {
+      final trainers = await _trainersFuture;
+
+      if (!mounted) return;
+
+      final result = await TrainerFiltersBottomSheet.show(
+        context,
+        trainers: trainers,
+        initialFilters: _trainerFilters.copyWith(
+          service: _selectedCategory == 'All' ? null : _selectedCategory,
+          clearService: _selectedCategory == 'All',
+          femaleOnly: _showFemaleOnly,
+        ),
+      );
+
+      if (result == null || !mounted) {
+        return;
+      }
+
+      setState(() {
+        _trainerFilters = result;
+
+        _showFemaleOnly = result.femaleOnly;
+
+        _selectedCategory = result.service ?? 'All';
+      });
+    } catch (error) {
+      debugPrint('Could not open trainer filters: $error');
+    }
+  }
+
   Widget _buildCategoryFilters(BuildContext context) {
     return SizedBox(
-      height: 36,
-      child: ListView.separated(
+      height: 40,
+      child: ListView(
         scrollDirection: Axis.horizontal,
-        itemCount: _categories.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final category = _categories[index];
+        children: [
+          InkWell(
+            onTap: _openFilters,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: GSWColors.surfaceInteractive,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: GSWColors.borderSecondary),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SvgPicture.asset(
+                    GSWIcons.filter,
+                    width: 18,
+                    height: 18,
+                    colorFilter: const ColorFilter.mode(GSWColors.textPrimary, BlendMode.srcIn),
+                  ),
 
-          final isSelected = !category.isComingSoon && _selectedCategory == category.label;
+                  const SizedBox(width: 8),
 
-          return GSWFilterChip(
-            label: category.label,
-            iconPath: category.iconPath,
-            isSelected: isSelected,
-            isEnabled: !category.isComingSoon,
-            trailing: category.isComingSoon ? const GSWStatusPill(label: 'Soon') : null,
-            onTap: () {
-              setState(() {
-                _selectedCategory = category.label;
-              });
-            },
-          );
-        },
+                  Text(
+                    _filterButtonLabel,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: GSWColors.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          for (int index = 0; index < _categories.length; index++) ...[
+            Builder(
+              builder: (context) {
+                final category = _categories[index];
+
+                final isSelected = !category.isComingSoon && _selectedCategory == category.label;
+
+                return GSWFilterChip(
+                  label: category.label,
+                  iconPath: category.iconPath,
+                  isSelected: isSelected,
+                  isEnabled: !category.isComingSoon,
+                  trailing: category.isComingSoon ? const GSWStatusPill(label: 'Soon') : null,
+                  onTap: () {
+                    if (category.isComingSoon) {
+                      return;
+                    }
+
+                    setState(() {
+                      _selectedCategory = category.label;
+                    });
+                  },
+                );
+              },
+            ),
+
+            if (index != _categories.length - 1) const SizedBox(width: 8),
+          ],
+        ],
       ),
+    );
+  }
+
+  String get _filterButtonLabel {
+    final count = _appliedFilterCount;
+
+    if (count == 0) {
+      return 'Filters';
+    }
+
+    return 'Filters ($count)';
+  }
+
+  Widget _buildMatchingCardIfAllowed() {
+    return FutureBuilder<bool>(
+      future: _activeConciergeMatchService.hasActiveMatch(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            snapshot.hasError ||
+            snapshot.data == true) {
+          return const SizedBox.shrink();
+        }
+
+        return TrainerMatchingCard(
+          onTap: () {
+            context.push(GSWRoutes.helpMeChoose);
+          },
+        );
+      },
     );
   }
 
@@ -262,19 +387,13 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
         final trainers = snapshot.data ?? [];
 
-        final filteredTrainers = trainers.where((trainer) {
-          // Female-only filter
-          if (_showFemaleOnly && trainer.gender != 'female') {
-            return false;
-          }
+        final activeFilters = _trainerFilters.copyWith(
+          service: _selectedCategory == 'All' ? null : _selectedCategory,
+          clearService: _selectedCategory == 'All',
+          femaleOnly: _showFemaleOnly,
+        );
 
-          // Service filter
-          if (_selectedCategory != 'All' && trainer.primaryService != _selectedCategory) {
-            return false;
-          }
-
-          return true;
-        }).toList();
+        final filteredTrainers = trainers.where(activeFilters.matchesTrainer).toList();
 
         if (filteredTrainers.isEmpty) {
           return Column(
@@ -294,11 +413,7 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
               const SizedBox(height: 20),
 
-              TrainerMatchingCard(
-                onTap: () {
-                  context.push(GSWRoutes.helpMeChoose);
-                },
-              ),
+              _buildMatchingCardIfAllowed(),
             ],
           );
         }
@@ -324,20 +439,42 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
                   );
                 },
               ),
-              if (index == 0) ...[
-                const SizedBox(height: 24),
-
-                TrainerMatchingCard(
-                  onTap: () {
-                    context.push(GSWRoutes.helpMeChoose);
-                  },
-                ),
-              ],
+              if (index == 0) ...[const SizedBox(height: 24), _buildMatchingCardIfAllowed()],
               if (index != filteredTrainers.length - 1) const SizedBox(height: 24),
             ],
           ],
         );
       },
     );
+  }
+
+  int get _appliedFilterCount {
+    var count = 0;
+
+    if (_trainerFilters.service != null) {
+      count++;
+    }
+
+    if (_trainerFilters.specialty != null) {
+      count++;
+    }
+
+    if (_trainerFilters.areas.isNotEmpty) {
+      count++;
+    }
+
+    if (_trainerFilters.femaleOnly || _trainerFilters.languages.isNotEmpty) {
+      count++;
+    }
+
+    if (_trainerFilters.sessionModes.isNotEmpty) {
+      count++;
+    }
+
+    if (_trainerFilters.minPrice > 150 || _trainerFilters.maxPrice < 400) {
+      count++;
+    }
+
+    return count;
   }
 }

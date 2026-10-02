@@ -62,7 +62,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
     _countryService = CountryService();
 
-    _countries = _countryService.getAll()..sort((a, b) => a.name.compareTo(b.name));
+    _countries = _countryService.getAll()
+      ..sort((a, b) => a.name.compareTo(b.name));
 
     _selectedCountry = _countryService.findByCode('AE')!;
 
@@ -91,7 +92,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   }
 
   void _syncCountryField() {
-    _countryController.text = '${_selectedCountry.flagEmoji} +${_selectedCountry.phoneCode}';
+    _countryController.text =
+        '${_selectedCountry.flagEmoji} +${_selectedCountry.phoneCode}';
   }
 
   void _handlePhoneChanged() {
@@ -262,7 +264,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
           children: [
             Expanded(
               child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(overscroll: false),
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -309,7 +313,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         child: const SizedBox(
           width: 46,
           height: 46,
-          child: Center(child: Icon(Icons.close, size: 22, color: GSWColors.primary)),
+          child: Center(
+            child: Icon(Icons.close, size: 22, color: GSWColors.primary),
+          ),
         ),
       ),
     );
@@ -325,7 +331,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       children: [
         Text(
           "WHAT'S YOUR NUMBER?",
-          style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.displaySmall.copyWith(
+            color: GSWColors.textPrimary,
+          ),
         ),
 
         const SizedBox(height: 10),
@@ -333,7 +341,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         Text(
           'We send your code on WhatsApp, then use this number '
           'to confirm your sessions. No password to remember.',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(
+            color: GSWColors.textSecondary,
+          ),
         ),
       ],
     );
@@ -505,7 +515,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: GSWButton(
         size: GSWButtonSize.large,
-        variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+        variant: _canContinue
+            ? GSWButtonVariant.primary
+            : GSWButtonVariant.disabled,
         label: _isSending ? 'Sending...' : 'Continue',
         onPressed: _canContinue ? _continue : null,
       ),
@@ -518,7 +530,10 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 // =============================================================================
 
 class _CountryPickerDropdown extends StatefulWidget {
-  const _CountryPickerDropdown({required this.countries, required this.onSelected});
+  const _CountryPickerDropdown({
+    required this.countries,
+    required this.onSelected,
+  });
 
   final List<Country> countries;
   final ValueChanged<Country> onSelected;
@@ -583,7 +598,9 @@ class _CountryPickerDropdownState extends State<_CountryPickerDropdown> {
                 ? Center(
                     child: Text(
                       'No countries found',
-                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                      style: GSWTextStyles.bodyMedium.copyWith(
+                        color: GSWColors.textSecondary,
+                      ),
                     ),
                   )
                 : ListView.separated(
@@ -604,7 +621,10 @@ class _CountryPickerDropdownState extends State<_CountryPickerDropdown> {
                           height: 48,
                           child: Row(
                             children: [
-                              Text(country.flagEmoji, style: const TextStyle(fontSize: 20)),
+                              Text(
+                                country.flagEmoji,
+                                style: const TextStyle(fontSize: 20),
+                              ),
 
                               const SizedBox(width: 10),
 

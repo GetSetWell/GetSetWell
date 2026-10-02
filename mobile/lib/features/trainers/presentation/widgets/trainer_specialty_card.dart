@@ -5,7 +5,11 @@ import 'package:mobile/core/theme/gsw_typography.dart';
 import '../../../../core/theme/gsw_colors.dart';
 
 class TrainerSpecialtyCard extends StatelessWidget {
-  const TrainerSpecialtyCard({super.key, required this.label, required this.iconPath});
+  const TrainerSpecialtyCard({
+    super.key,
+    required this.label,
+    required this.iconPath,
+  });
 
   final String label;
   final String iconPath;
@@ -25,7 +29,10 @@ class TrainerSpecialtyCard extends StatelessWidget {
             iconPath,
             width: 20,
             height: 20,
-            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+            colorFilter: const ColorFilter.mode(
+              GSWColors.iconAccent,
+              BlendMode.srcIn,
+            ),
           ),
 
           const SizedBox(height: 8),
@@ -33,7 +40,9 @@ class TrainerSpecialtyCard extends StatelessWidget {
           Text(
             label,
             textAlign: TextAlign.center,
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textPrimary,
+            ),
           ),
         ],
       ),

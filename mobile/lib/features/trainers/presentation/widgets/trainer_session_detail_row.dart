@@ -6,7 +6,11 @@ import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_sizes.dart';
 
 class TrainerSessionDetailRow extends StatelessWidget {
-  const TrainerSessionDetailRow({super.key, required this.iconPath, required this.text});
+  const TrainerSessionDetailRow({
+    super.key,
+    required this.iconPath,
+    required this.text,
+  });
 
   final String iconPath;
   final String text;
@@ -20,7 +24,10 @@ class TrainerSessionDetailRow extends StatelessWidget {
           iconPath,
           width: GSWSizes.icon,
           height: GSWSizes.icon,
-          colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          colorFilter: const ColorFilter.mode(
+            GSWColors.iconAccent,
+            BlendMode.srcIn,
+          ),
         ),
 
         const SizedBox(width: 8),
@@ -28,7 +35,9 @@ class TrainerSessionDetailRow extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+            ),
           ),
         ),
       ],

@@ -1,7 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ProfileRepository {
-  ProfileRepository({SupabaseClient? client}) : _client = client ?? Supabase.instance.client;
+  ProfileRepository({SupabaseClient? client})
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -31,7 +32,10 @@ class ProfileRepository {
     return fullName.isNotEmpty && city.isNotEmpty;
   }
 
-  Future<void> saveBasicProfile({required String fullName, required String city}) async {
+  Future<void> saveBasicProfile({
+    required String fullName,
+    required String city,
+  }) async {
     final user = _currentUser;
 
     if (user == null) {

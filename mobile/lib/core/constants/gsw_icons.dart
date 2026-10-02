@@ -30,5 +30,11 @@ class GSWIcons {
   static const String bell = 'assets/icons/bell.svg';
   static const String home = 'assets/icons/home.svg';
   static const String search = 'assets/icons/search.svg';
+  static const String conditioning = 'assets/icons/conditioning.svg';
   static const String profile = 'assets/icons/profile.svg';
+  static const String fatLoss = 'assets/icons/fat-loss.svg';
+  static const String muscleBuilding = 'assets/icons/muscle-building.svg';
+  static const String generalFitness = 'assets/icons/general-fitness.svg';
+  static const String functionalTraining = 'assets/icons/functional-training.svg';
+  static const String goal = 'assets/icons/Goal.svg';
 }
