@@ -180,6 +180,7 @@ class GSWTextStyles {
   static const TextStyle labelMedium = TextStyle(
     fontFamily: 'Outfit',
     fontSize: 14,
+    height: 1.25,
     fontWeight: FontWeight.w500,
     letterSpacing: 0,
   );

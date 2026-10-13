@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
@@ -26,6 +27,10 @@ class _YourMatchScreenState extends State<YourMatchScreen> {
   }
 
   Future<Map<String, dynamic>> _loadRequest() async {
+    final customerId = await CustomerIdentityService(
+      client: Supabase.instance.client,
+    ).getCustomerId();
+
     final row = await Supabase.instance.client
         .from('booking_requests')
         .select('''
@@ -48,13 +53,14 @@ class _YourMatchScreenState extends State<YourMatchScreen> {
           training_locations (
             name
           ),
-          trainers (
-            full_name,
-            profile_image_url,
-            price_per_session
-          )
+          trainers!booking_requests_trainer_id_fkey (
+  full_name,
+  profile_image_url,
+  price_per_session
+)
           ''')
         .eq('id', widget.requestId)
+        .eq('user_id', customerId)
         .single();
 
     return Map<String, dynamic>.from(row);
@@ -73,6 +79,7 @@ class _YourMatchScreenState extends State<YourMatchScreen> {
             }
 
             if (snapshot.hasError || snapshot.data == null) {
+              debugPrint('Your match load failed: ${snapshot.error}');
               return Center(
                 child: Text(
                   'Could not load your match.',
@@ -368,17 +375,15 @@ class _YourMatchScreenState extends State<YourMatchScreen> {
     }
 
     try {
-      final user = Supabase.instance.client.auth.currentUser;
-
-      if (user == null) {
-        throw Exception('Authentication required.');
-      }
+      final customerId = await CustomerIdentityService(
+        client: Supabase.instance.client,
+      ).getCustomerId();
 
       await Supabase.instance.client
           .from('booking_requests')
           .update({'status': 'cancelled'})
           .eq('id', widget.requestId)
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .eq('request_type', 'concierge_match');
 
       if (!mounted) return;

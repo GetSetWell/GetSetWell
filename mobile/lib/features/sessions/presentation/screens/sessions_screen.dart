@@ -3,23 +3,29 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
 import 'package:mobile/features/booking/data/services/booking_request_service.dart';
+import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
 import 'package:mobile/features/sessions/data/services/sessions_service.dart';
+import 'package:mobile/features/sessions/presentation/screens/session_confirmation_flow.dart';
+import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SessionsScreen extends StatefulWidget {
-  const SessionsScreen({super.key});
+  const SessionsScreen({super.key, this.initialTab = 0});
+
+  final int initialTab;
 
   @override
   State<SessionsScreen> createState() => _SessionsScreenState();
 }
 
 class _SessionsScreenState extends State<SessionsScreen> {
-  int _selectedTab = 0;
+  late int _selectedTab;
 
   static const _tabs = ['Requests', 'Upcoming', 'Past'];
 
@@ -44,6 +50,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
     _sessionsService = SessionsService(Supabase.instance.client);
 
     _upcomingSessionsFuture = _sessionsService.getUpcomingSessions();
+
+    _selectedTab = widget.initialTab;
 
     _pastSessionsFuture = _loadPastSessions();
   }
@@ -331,9 +339,24 @@ class _SessionsScreenState extends State<SessionsScreen> {
       if (preference.isNotEmpty) '${_capitalize(preference)} preference' else 'No preference',
     ].join(' · ');
 
+    final trainerId = request['trainer_id']?.toString().trim() ?? '';
+
+    final matchedAt = request['matched_at']?.toString().trim() ?? '';
+
     final isMatched = status == 'matched';
+
+    final hadRecommendation = trainerId.isNotEmpty && matchedAt.isNotEmpty;
+
+    final isCancelled = status == 'cancelled' || status == 'canceled';
+
+    final isCancelledAfterMatch = isCancelled && hadRecommendation;
+
+    final isMatchingInProgress =
+        request['request_type']?.toString() == 'concierge_match' &&
+        _isOpenRequest(request) &&
+        !isMatched;
+
     final isBooked = status == 'confirmed' || status == 'booked';
-    final isMatchingInProgress = _isOpenRequest(request) && !isMatched;
 
     final footerText = isMatched
         ? 'Take a look and book if he fits.'
@@ -350,17 +373,28 @@ class _SessionsScreenState extends State<SessionsScreen> {
     void onTap() {
       if (isMatched) {
         context.push(GSWRoutes.yourMatch, extra: request['id']?.toString() ?? '');
+
         return;
       }
+
       if (isMatchingInProgress) {
         context.push(GSWRoutes.conciergeRequestStatus, extra: request['id']?.toString() ?? '');
 
         return;
       }
-      if (isBooked) {
-        _openBookedRequestSession(request);
+
+      if (isCancelledAfterMatch) {
+        context.push(GSWRoutes.matchedTrainer, extra: request['id']?.toString() ?? '');
+
         return;
       }
+
+      if (isBooked) {
+        _openBookedRequestSession(request);
+
+        return;
+      }
+
       _openConciergeRequest(request);
     }
 
@@ -412,6 +446,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
         if (snapshot.hasError) {
           debugPrint('Upcoming sessions load failed: ${snapshot.error}');
+          //debugPrintStack(stackTrace: snapshot.stackTrace);
 
           return _buildEmptyState(
             title: 'Could not load sessions.',
@@ -937,7 +972,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
   bool _isOpenRequest(Map<String, dynamic> request) {
     final status = request['status']?.toString().trim().toLowerCase() ?? '';
 
-    const closedStatuses = {'closed', 'cancelled', 'canceled', 'completed', 'confirmed', 'lost'};
+    const closedStatuses = {
+      'closed',
+      'cancelled',
+      'canceled',
+      'completed',
+      'confirmed',
+      'booked',
+      'lost',
+    };
 
     return !closedStatuses.contains(status);
   }
@@ -1117,13 +1160,11 @@ class _SessionsScreenState extends State<SessionsScreen> {
   Widget _buildPast() {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _pastSessionsFuture,
-
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 48),
-
               child: CircularProgressIndicator(color: GSWColors.primary),
             ),
           );
@@ -1131,10 +1172,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
         if (snapshot.hasError) {
           debugPrint('Past sessions load failed: ${snapshot.error}');
-
           return _buildEmptyState(
             title: 'Could not load past sessions.',
-
             message: 'Please try again in a moment.',
           );
         }
@@ -1144,57 +1183,35 @@ class _SessionsScreenState extends State<SessionsScreen> {
         if (sessions.isEmpty) {
           return _buildEmptyState(
             icon: GSWIcons.calendar,
-
             title: 'No past sessions yet',
-
             message: 'Once you’ve trained, your sessions and receipts will be here.',
-
             ctaLabel: 'Find a trainer',
-
             onCtaPressed: () {
               context.go(GSWRoutes.browseTrainers);
             },
           );
         }
 
-        final needsYou = sessions.where((session) {
-          final status = session['status']?.toString().trim().toLowerCase() ?? '';
-
-          return status == 'confirmed' || status == 'booked';
-        }).toList();
-
-        final earlier = sessions.where((session) {
-          final status = session['status']?.toString().trim().toLowerCase() ?? '';
-
-          return status != 'confirmed' && status != 'booked';
-        }).toList();
+        final needsYou = sessions.where(_sessionNeedsConfirmation).toList();
+        final earlier = sessions.where((session) => !_sessionNeedsConfirmation(session)).toList();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-
           children: [
             if (needsYou.isNotEmpty) ...[
               _buildSectionLabel('NEEDS YOU'),
-
               const SizedBox(height: 14),
-
               for (var index = 0; index < needsYou.length; index++) ...[
                 _buildPastSessionCard(needsYou[index], needsAction: true),
-
                 if (index != needsYou.length - 1) const SizedBox(height: 16),
               ],
-
               if (earlier.isNotEmpty) const SizedBox(height: 26),
             ],
-
             if (earlier.isNotEmpty) ...[
               _buildSectionLabel('EARLIER'),
-
               const SizedBox(height: 14),
-
               for (var index = 0; index < earlier.length; index++) ...[
                 _buildPastSessionCard(earlier[index]),
-
                 if (index != earlier.length - 1) const SizedBox(height: 16),
               ],
             ],
@@ -1205,93 +1222,132 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _loadPastSessions() async {
-    final user = Supabase.instance.client.auth.currentUser;
+    final client = Supabase.instance.client;
+    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
-    if (user == null) return [];
-
-    final rows = await Supabase.instance.client
+    final rows = await client
         .from('sessions')
         .select('''
-  id,
-  reference_code,
-  request_type,
-  status,
-  goal,
-  preferred_days,
-  preferred_time,
-  preferred_area,
-  trainer_gender_preference,
-  budget_min,
-  budget_max,
-  language_preference,
-  message,
-  trainer_id,
-  match_outcome,
-  match_reason,
-  matched_at,
-  training_locations(name),
-  trainers(
-    full_name,
-    profile_image_url,
-    price_per_session
-  )
-''')
-        .eq('user_id', user.id)
-        .order('scheduled_at', ascending: false);
+          id,
+          booking_request_id,
+          trainer_id,
+          scheduled_at,
+          location_label,
+          status,
+          completion_prompt_shown_at,
+          customer_outcome,
+          customer_feedback_category,
+          customer_feedback_note,
+          customer_confirmed_at,
+          cancelled_at,
+          trainers(
+            full_name,
+            profile_image_url,
+            price_per_session
+          )
+        ''')
+        .eq('user_id', customerId);
 
     final nowUtc = DateTime.now().toUtc();
 
-    return rows.map((row) => Map<String, dynamic>.from(row)).where((session) {
-      final status = session['status']?.toString().trim().toLowerCase() ?? '';
-
+    final sessions = rows.map((row) => Map<String, dynamic>.from(row)).where((session) {
       final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
 
-      final closedStatus = {'completed', 'cancelled', 'canceled'}.contains(status);
+      final status = session['status']?.toString().trim().toLowerCase() ?? '';
 
-      final hasEnded =
+      final ended =
           scheduledAt != null && scheduledAt.toUtc().add(const Duration(hours: 1)).isBefore(nowUtc);
 
-      return closedStatus || hasEnded;
+      final closed = {'completed', 'cancelled', 'canceled'}.contains(status);
+
+      return ended || closed;
     }).toList();
+
+    sessions.sort((a, b) {
+      DateTime eventTime(Map<String, dynamic> session) {
+        final status = session['status']?.toString().trim().toLowerCase() ?? '';
+
+        if (status == 'cancelled' || status == 'canceled') {
+          final cancelledAt = DateTime.tryParse(session['cancelled_at']?.toString() ?? '');
+
+          if (cancelledAt != null) {
+            return cancelledAt.toUtc();
+          }
+        }
+
+        final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
+
+        if (scheduledAt != null) {
+          return scheduledAt.toUtc().add(const Duration(hours: 1));
+        }
+
+        return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+      }
+
+      return eventTime(b).compareTo(eventTime(a));
+    });
+
+    return sessions;
+  }
+
+  bool _sessionNeedsConfirmation(Map<String, dynamic> session) {
+    final status = session['status']?.toString().trim().toLowerCase() ?? '';
+    if (status != 'confirmed' && status != 'booked') return false;
+
+    final outcome = session['customer_outcome']?.toString().trim() ?? '';
+    if (outcome.isNotEmpty) return false;
+
+    final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
+    if (scheduledAt == null) return false;
+
+    final sessionEndUtc = scheduledAt.toUtc().add(const Duration(hours: 1));
+    final nowUtc = DateTime.now().toUtc();
+    if (nowUtc.isBefore(sessionEndUtc)) return false;
+
+    return nowUtc.isBefore(sessionEndUtc.add(const Duration(hours: 24)));
+  }
+
+  bool _sessionIsUnansweredAndExpired(Map<String, dynamic> session) {
+    final status = session['status']?.toString().trim().toLowerCase() ?? '';
+    final outcome = session['customer_outcome']?.toString().trim() ?? '';
+    if ((status != 'confirmed' && status != 'booked') || outcome.isNotEmpty) return false;
+
+    final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
+    if (scheduledAt == null) return false;
+
+    final responseDeadline = scheduledAt.toUtc().add(const Duration(hours: 25));
+    return !DateTime.now().toUtc().isBefore(responseDeadline);
   }
 
   Widget _buildPastSessionCard(Map<String, dynamic> session, {bool needsAction = false}) {
     final trainer = session['trainers'];
-
     String trainerName = 'Your trainer';
-
     String? profileImageUrl;
 
     if (trainer is Map) {
       final name = trainer['full_name']?.toString().trim();
-
       final imageUrl = trainer['profile_image_url']?.toString().trim();
-
       if (name != null && name.isNotEmpty) trainerName = name;
-
       if (imageUrl != null && imageUrl.isNotEmpty) profileImageUrl = imageUrl;
     }
 
     final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
-
     final location = session['location_label']?.toString().trim() ?? '';
-
     final status = session['status']?.toString().trim().toLowerCase() ?? '';
-
     if (scheduledAt == null) return const SizedBox.shrink();
 
     final dubaiStart = _toDubai(scheduledAt);
-
     final dubaiEnd = dubaiStart.add(const Duration(hours: 1));
-
     final cancelled = status == 'cancelled' || status == 'canceled';
-
-    final completed = status == 'completed';
+    final reported = status == 'reported';
+    final completed = status == 'completed' || _sessionIsUnansweredAndExpired(session);
 
     final statusLabel = needsAction
         ? _endedRelativeLabel(dubaiStart)
         : cancelled
         ? 'Cancelled'
+        : reported
+        ? 'Reported'
         : completed
         ? 'Completed'
         : _capitalize(status);
@@ -1300,76 +1356,75 @@ class _SessionsScreenState extends State<SessionsScreen> {
         ? 'Did this session take place?'
         : cancelled
         ? 'Session cancelled'
+        : reported
+        ? 'We are looking into this session'
         : 'Book again';
 
-    final footerRight = needsAction ? 'Tell us' : 'View receipt';
+    final footerRight = needsAction
+        ? 'Tell us'
+        : reported
+        ? 'View details'
+        : 'View receipt';
 
     return Opacity(
       opacity: cancelled ? 0.72 : 1,
-
       child: _tapCard(
-        onTap: () => _handleSessionCardTap(session),
-
+        onTap: () {
+          if (needsAction) {
+            showSessionConfirmationFlow(
+              context: context,
+              session: session,
+              onBookAgain: (session) async {
+                await _startRepeatBooking(session);
+              },
+              onFinished: () async {
+                await _refreshSessions();
+              },
+            );
+            return;
+          }
+          _handleSessionCardTap(session);
+        },
         borderColor: needsAction ? GSWColors.primary : GSWColors.surfaceInteractive,
-
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
-
                 children: [
                   _buildSessionDateBlock(dubaiStart),
-
                   const SizedBox(width: 16),
-
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-
                       children: [
                         Text(
                           statusLabel,
-
                           style: GSWTextStyles.bodySmall.copyWith(
                             color: needsAction ? GSWColors.primary : GSWColors.textSecondary,
-
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-
                         const SizedBox(height: 6),
-
                         Text(
                           '${_sessionTimeLabel(dubaiStart)} to ${_sessionTimeLabel(dubaiEnd)}',
-
                           style: GSWTextStyles.labelLarge.copyWith(
                             color: GSWColors.textPrimary,
-
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-
                         const SizedBox(height: 6),
-
                         Row(
                           children: [
                             _buildTrainerAvatar(trainerName, profileImageUrl),
-
                             const SizedBox(width: 10),
-
                             Expanded(
                               child: Text(
                                 '$trainerName · Personal training',
-
                                 maxLines: 1,
-
                                 overflow: TextOverflow.ellipsis,
-
                                 style: GSWTextStyles.bodyMedium.copyWith(
                                   color: GSWColors.textPrimary,
                                 ),
@@ -1377,16 +1432,11 @@ class _SessionsScreenState extends State<SessionsScreen> {
                             ),
                           ],
                         ),
-
                         const SizedBox(height: 8),
-
                         Text(
                           [if (location.isNotEmpty) location, '60 min'].join(' · '),
-
                           maxLines: 1,
-
                           overflow: TextOverflow.ellipsis,
-
                           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                         ),
                       ],
@@ -1395,37 +1445,66 @@ class _SessionsScreenState extends State<SessionsScreen> {
                 ],
               ),
             ),
-
             Divider(height: 1, color: GSWColors.neutral700),
-
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      footerLeft,
-
-                      style: GSWTextStyles.bodyMedium.copyWith(
-                        color: needsAction
-                            ? GSWColors.textPrimary
-                            : cancelled
-                            ? GSWColors.textSecondary
-                            : GSWColors.primary,
-                      ),
-                    ),
+                    child: needsAction
+                        ? Text(
+                            footerLeft,
+                            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+                          )
+                        : (!cancelled && !reported && completed)
+                        ? InkWell(
+                            onTap: () => _startRepeatBooking(session),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                'Book again',
+                                style: GSWTextStyles.bodyMedium.copyWith(
+                                  color: GSWColors.primary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          )
+                        : Text(
+                            footerLeft,
+                            style: GSWTextStyles.bodyMedium.copyWith(
+                              color: GSWColors.textSecondary,
+                            ),
+                          ),
                   ),
-
                   const SizedBox(width: 12),
+                  InkWell(
+                    onTap: () {
+                      if (needsAction) {
+                        showSessionConfirmationFlow(
+                          context: context,
+                          session: session,
+                          onBookAgain: (session) async {
+                            await _startRepeatBooking(session);
+                          },
+                          onFinished: () async {
+                            await _refreshSessions();
+                          },
+                        );
+                        return;
+                      }
 
-                  Text(
-                    footerRight,
-
-                    style: GSWTextStyles.bodyMedium.copyWith(
-                      color: needsAction ? GSWColors.primary : GSWColors.textPrimary,
-
-                      fontWeight: FontWeight.w600,
+                      _handleSessionCardTap(session);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        footerRight,
+                        style: GSWTextStyles.bodyMedium.copyWith(
+                          color: needsAction ? GSWColors.primary : GSWColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1435,6 +1514,103 @@ class _SessionsScreenState extends State<SessionsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _refreshSessions() async {
+    if (!mounted) return;
+    setState(() {
+      _requestsFuture = _bookingRequestService.getMyRequests();
+      _upcomingSessionsFuture = _sessionsService.getUpcomingSessions();
+      _pastSessionsFuture = _loadPastSessions();
+    });
+  }
+
+  Future<void> _startRepeatBooking(Map<String, dynamic> session) async {
+    final trainerId = session['trainer_id']?.toString().trim() ?? '';
+    final bookingRequestId = session['booking_request_id']?.toString().trim() ?? '';
+
+    if (trainerId.isEmpty) {
+      _showRepeatBookingError();
+      return;
+    }
+
+    try {
+      final client = Supabase.instance.client;
+
+      final repository = TrainerRepository(client);
+      final trainers = await repository.getTrainers();
+
+      dynamic selectedTrainer;
+
+      for (final trainer in trainers) {
+        if (trainer.id == trainerId) {
+          selectedTrainer = trainer;
+          break;
+        }
+      }
+
+      if (!mounted) return;
+
+      if (selectedTrainer == null) {
+        _showRepeatBookingError();
+        return;
+      }
+
+      Map<String, dynamic>? previousBooking;
+
+      if (bookingRequestId.isNotEmpty) {
+        final row = await client
+            .from('booking_requests')
+            .select('''
+            goal,
+            message
+          ''')
+            .eq('id', bookingRequestId)
+            .maybeSingle();
+
+        if (row != null) {
+          previousBooking = Map<String, dynamic>.from(row);
+        }
+      }
+
+      if (!mounted) return;
+
+      final sessionLocation = session['location_label']?.toString().trim();
+
+      context.push(
+        GSWRoutes.bookingRequest,
+        extra: BookingRequestRouteData(
+          trainer: selectedTrainer,
+          initialGoal: previousBooking?['goal']?.toString().trim(),
+          initialLocationLabel: sessionLocation,
+          initialNotes: previousBooking?['message']?.toString().trim(),
+          isRepeatBooking: true,
+        ),
+      );
+    } catch (error) {
+      debugPrint('Could not start repeat booking: $error');
+
+      if (!mounted) return;
+
+      _showRepeatBookingError();
+    }
+  }
+
+  void _showRepeatBookingError() {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'We could not open this trainer’s availability. Please try again.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+          ),
+          backgroundColor: GSWColors.surfaceElevated,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   Widget _buildSectionLabel(String label) {
@@ -1495,15 +1671,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
     if (requestId.isEmpty) return;
 
     try {
-      final user = Supabase.instance.client.auth.currentUser;
-
-      if (user == null) return;
+      final customerId = await CustomerIdentityService(
+        client: Supabase.instance.client,
+      ).getCustomerId();
 
       final session = await Supabase.instance.client
           .from('sessions')
           .select('id')
           .eq('booking_request_id', requestId)
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .maybeSingle();
 
       if (!mounted || session == null) return;

@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:phone_numbers_parser/phone_numbers_parser.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/services/push_notification_service.dart';
 import '../../../../core/theme/gsw_colors.dart';
@@ -14,22 +16,34 @@ import '../../data/services/phone_auth_service.dart';
 class OtpVerificationScreen extends StatefulWidget {
   const OtpVerificationScreen({
     super.key,
+
     required this.phone,
+
+    required this.verificationId,
+
     required this.onBack,
+
     required this.onChangeNumber,
+
     required this.onVerified,
+
     this.onNotOnWhatsApp,
   });
 
   final String phone;
 
+  final String verificationId;
+
   final VoidCallback onBack;
+
   final VoidCallback onChangeNumber;
 
   /// Called after Supabase successfully verifies the OTP.
+
   final ValueChanged<bool> onVerified;
 
   /// We can wire SMS fallback here later.
+
   final VoidCallback? onNotOnWhatsApp;
 
   @override
@@ -38,6 +52,7 @@ class OtpVerificationScreen extends StatefulWidget {
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   static const int _otpLength = 6;
+
   static const int _initialResendSeconds = 30;
 
   final TextEditingController _otpController = TextEditingController();
@@ -45,7 +60,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   final FocusNode _otpFocusNode = FocusNode();
 
   final PhoneAuthService _phoneAuthService = PhoneAuthService();
+
   final ProfileRepository _profileRepository = ProfileRepository();
+
   late final TapGestureRecognizer _changeNumberRecognizer;
 
   Timer? _resendTimer;
@@ -53,13 +70,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   int _resendSeconds = _initialResendSeconds;
 
   bool _isVerifying = false;
+
   bool _isResending = false;
+  bool _firebaseOtpVerified = false;
 
   String? _errorMessage;
+
+  late String _activeVerificationId;
 
   @override
   void initState() {
     super.initState();
+
+    _activeVerificationId = widget.verificationId;
 
     _changeNumberRecognizer = TapGestureRecognizer()..onTap = widget.onChangeNumber;
 
@@ -77,6 +100,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     _resendTimer?.cancel();
 
     _otpController.dispose();
+
     _otpFocusNode.dispose();
 
     _changeNumberRecognizer.dispose();
@@ -85,7 +109,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // PHONE DISPLAY
+
   // ---------------------------------------------------------------------------
 
   String get _formattedPhone {
@@ -101,7 +127,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // OTP
+
   // ---------------------------------------------------------------------------
 
   String get _code => _otpController.text;
@@ -120,67 +148,101 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     }
   }
 
+  // Firebase Auth onCreate triggers run asynchronously. Refresh the ID token
+  // until the backend has assigned the Supabase authenticated role.
+  Future<void> _waitForSupabaseRole() async {
+    for (var attempt = 0; attempt < 15; attempt++) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        throw StateError('Your Firebase sign-in session is unavailable.');
+      }
+
+      final token = await user.getIdTokenResult(true);
+      if (token.claims?['role'] == 'authenticated') {
+        return;
+      }
+
+      if (attempt < 14) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+    }
+    throw TimeoutException('Your account is taking longer to set up. Please try again.');
+  }
+
   Future<void> _verifyCode() async {
-    if (_isVerifying) return;
+    if (_isVerifying || _isResending) return;
 
     final code = _otpController.text;
-
-    if (code.length != _otpLength) {
-      return;
-    }
+    if (code.length != _otpLength) return;
 
     FocusScope.of(context).unfocus();
-
     setState(() {
       _isVerifying = true;
       _errorMessage = null;
     });
 
     try {
-      // ---------------------------------------------------------
-      // 1. VERIFY OTP
-      // ---------------------------------------------------------
+      // The existing phone service may reject a successful Firebase sign-in
+      // while the asynchronously assigned custom role is still unavailable.
+      if (!_firebaseOtpVerified) {
+        try {
+          await _phoneAuthService.verifyOtp(
+            phone: widget.phone,
+            otp: code,
+            verificationId: _activeVerificationId,
+          );
+          _firebaseOtpVerified = true;
+        } on StateError catch (error) {
+          if (error.message != 'Firebase token is missing the authenticated role claim.' ||
+              FirebaseAuth.instance.currentUser == null) {
+            rethrow;
+          }
+          _firebaseOtpVerified = true;
+        }
+      }
 
-      final response = await _phoneAuthService.verifyOtp(phone: widget.phone, otp: code);
-
-      debugPrint('OTP USER: ${response.user?.id}');
-      debugPrint('OTP SESSION: ${response.session != null}');
-      
-      await PushNotificationService().registerCurrentDevice();
+      await _waitForSupabaseRole();
+      await Supabase.instance.client.rpc('ensure_customer_identity');
     } catch (error) {
-      debugPrint('OTP VERIFY ERROR: $error');
-
+      debugPrint('OTP sign-in/setup failed: $error');
       if (!mounted) return;
 
+      final String message;
+      if (error is FirebaseAuthException &&
+          (error.code == 'invalid-verification-code' ||
+              error.code == 'invalid-verification-id' ||
+              error.code == 'session-expired')) {
+        message = 'That code is not right or has expired. Try again.';
+      } else if (error is TimeoutException) {
+        message = 'Account setup is taking longer than expected. Please try again.';
+      } else {
+        message = 'We could not finish signing you in. Please try again.';
+      }
+
       setState(() {
-        _errorMessage = 'That code is not right. Try again.';
+        _errorMessage = message;
         _isVerifying = false;
       });
-
       _otpFocusNode.requestFocus();
-
       return;
+    }
+
+    // Push permission or FCM availability must not block a successful login.
+    try {
+      await PushNotificationService().registerCurrentDevice();
+    } catch (error) {
+      debugPrint('Push device registration failed after login: $error');
     }
 
     if (!mounted) return;
 
     try {
-      // ---------------------------------------------------------
-      // 2. CHECK PROFILE
-      // ---------------------------------------------------------
-
       final hasCompletedProfile = await _profileRepository.hasCompletedProfile();
-
       if (!mounted) return;
-
       widget.onVerified(hasCompletedProfile);
     } catch (error) {
       debugPrint('PROFILE CHECK ERROR: $error');
-
       if (!mounted) return;
-
-      // Auth already succeeded.
-      // Treat missing/incomplete profile as first-time signup.
       widget.onVerified(false);
     } finally {
       if (mounted) {
@@ -192,7 +254,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // RESEND
+
   // ---------------------------------------------------------------------------
 
   void _startResendTimer() {
@@ -205,6 +269,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
+
         return;
       }
 
@@ -231,11 +296,21 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     setState(() {
       _isResending = true;
+
       _errorMessage = null;
     });
 
     try {
       await _phoneAuthService.sendOtp(phone: widget.phone);
+
+      final newVerificationId = _phoneAuthService.verificationId;
+
+      if (newVerificationId == null || newVerificationId.isEmpty) {
+        throw StateError('Firebase resend verification ID is missing.');
+      }
+
+      _activeVerificationId = newVerificationId;
+      _firebaseOtpVerified = false;
 
       if (!mounted) return;
 
@@ -262,22 +337,28 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // BUILD
+
   // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
+
       resizeToAvoidBottomInset: false,
+
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+
                   children: [
                     _buildBackButton(),
 
@@ -294,9 +375,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
                       SizedBox(
                         width: double.infinity,
+
                         child: Text(
                           _errorMessage!,
+
                           textAlign: TextAlign.center,
+
                           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.error),
                         ),
                       ),
@@ -318,19 +402,27 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // BACK
+
   // ---------------------------------------------------------------------------
 
   Widget _buildBackButton() {
     return Material(
       color: Colors.transparent,
+
       shape: CircleBorder(side: BorderSide(color: GSWColors.borderSecondary)),
+
       child: InkWell(
         onTap: widget.onBack,
+
         customBorder: const CircleBorder(),
+
         child: const SizedBox(
           width: 46,
+
           height: 46,
+
           child: Center(
             child: Icon(Icons.chevron_left_rounded, size: 30, color: GSWColors.primary),
           ),
@@ -340,15 +432,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // HEADER
+
   // ---------------------------------------------------------------------------
 
   Widget _buildHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+
       children: [
         Text(
           'CHECK YOUR WHATSAPP',
+
           style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
         ),
 
@@ -357,6 +453,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         Text.rich(
           TextSpan(
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+
             children: [
               const TextSpan(text: 'We sent a 6 digit code to '),
 
@@ -366,7 +463,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
               TextSpan(
                 text: 'Change number',
+
                 style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textAccent),
+
                 recognizer: _changeNumberRecognizer,
               ),
             ],
@@ -377,15 +476,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // CODE BOXES
+
   // ---------------------------------------------------------------------------
 
   Widget _buildCodeBoxes() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+
       onTap: () {
         _otpFocusNode.requestFocus();
       },
+
       child: Stack(
         children: [
           Row(
@@ -402,8 +505,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           Positioned.fill(
             child: Opacity(
               opacity: 0.01,
+
               child: TextField(
                 controller: _otpController,
+
                 focusNode: _otpFocusNode,
 
                 autofocus: true,
@@ -415,6 +520,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                 autofillHints: const [AutofillHints.oneTimeCode],
 
                 autocorrect: false,
+
                 enableSuggestions: false,
 
                 showCursor: false,
@@ -423,15 +529,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
+
                   LengthLimitingTextInputFormatter(_otpLength),
                 ],
+
                 style: const TextStyle(color: Colors.transparent),
 
                 cursorColor: Colors.transparent,
 
                 decoration: const InputDecoration(
                   border: InputBorder.none,
+
                   counterText: '',
+
                   contentPadding: EdgeInsets.zero,
                 ),
 
@@ -452,7 +562,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     final activeIndex = _code.length >= _otpLength ? _otpLength - 1 : _code.length;
 
     final isActive = _otpFocusNode.hasFocus && index == activeIndex && !_isVerifying;
+
     final hasValue = index < _code.length;
+
     final hasError = _errorMessage != null;
 
     final borderColor = hasError
@@ -463,15 +575,22 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 10),
+
       height: 64,
+
       alignment: Alignment.center,
+
       decoration: BoxDecoration(
         color: GSWColors.surfaceInteractive,
+
         borderRadius: BorderRadius.circular(16),
+
         border: Border.all(width: isActive ? 1.5 : 1.5, color: borderColor),
       ),
+
       child: Text(
         digit,
+
         style: GSWTextStyles.titleMedium.copyWith(
           color: hasError ? GSWColors.error : GSWColors.textPrimary,
         ),
@@ -480,7 +599,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // RESEND
+
   // ---------------------------------------------------------------------------
 
   Widget _buildResend() {
@@ -494,15 +615,22 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
     return SizedBox(
       width: double.infinity,
+
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
+
         onTap: canResend ? _resendCode : null,
+
         child: Text(
           label,
+
           textAlign: TextAlign.center,
+
           style: GSWTextStyles.bodySmall.copyWith(
             fontSize: 12,
+
             height: 16 / 12,
+
             color: canResend ? GSWColors.primary : GSWColors.textTertiary,
           ),
         ),
@@ -511,20 +639,28 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   // ---------------------------------------------------------------------------
+
   // BOTTOM
+
   // ---------------------------------------------------------------------------
 
   Widget _buildBottomHelper() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+
       child: SizedBox(
         width: double.infinity,
+
         child: Text(
           'The code fills in on its own once it arrives.',
+
           textAlign: TextAlign.center,
+
           style: GSWTextStyles.bodySmall.copyWith(
             fontSize: 12,
+
             height: 16 / 12,
+
             color: GSWColors.textTertiary,
           ),
         ),

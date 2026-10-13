@@ -32,4 +32,9 @@ class GSWRoutes {
   static const bookingPayment = '/booking/payment';
   static const conciergeRequestStatus = '/concierge-request-status';
   static const sessionDetails = '/session-details';
+  static const moveSession = '/move-session';
+  static const sessionMoved = '/session-moved';
+  static const cancelSession = '/cancel-session';
+  static const sessionCancelled = '/session-cancelled';
+  static const changePhone = '/change-phone';
 }

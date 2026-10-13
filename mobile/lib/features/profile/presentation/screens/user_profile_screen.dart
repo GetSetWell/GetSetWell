@@ -1,6 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/services/push_notification_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
@@ -47,23 +49,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<_UserProfileData> _loadProfile() async {
     final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       throw StateError('AUTH_REQUIRED');
     }
-
+    final customerId = await CustomerIdentityService(client: client).getCustomerId();
     final profile = await client
         .from('customer_profiles')
         .select('full_name, phone, city, email, profile_photo_path')
-        .eq('id', user.id)
+        .eq('id', customerId)
         .maybeSingle();
 
     final fullName = profile?['full_name']?.toString().trim() ?? '';
 
     final city = profile?['city']?.toString().trim() ?? '';
 
-    final authPhone = user.phone?.trim() ?? '';
+    final authPhone = user.phoneNumber?.trim() ?? '';
 
     final profilePhone = profile?['phone']?.toString().trim() ?? '';
 
@@ -81,11 +83,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           .createSignedUrl(photoPath, 60 * 60);
     }
 
-    final sessionRows = await client.from('sessions').select('id').eq('user_id', user.id);
+    final sessionRows = await client.from('sessions').select('id').eq('user_id', customerId);
 
     final sessionCount = sessionRows.length;
 
-    final memberSince = DateTime.tryParse(user.createdAt) ?? DateTime.now();
+    final memberSince = user.metadata.creationTime ?? DateTime.now();
 
     return _UserProfileData(
       fullName: fullName,
@@ -355,7 +357,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       try {
                         await PushNotificationService().deleteCurrentDeviceToken();
 
-                        await Supabase.instance.client.auth.signOut();
+                        await FirebaseAuth.instance.signOut();
 
                         if (!mounted) return;
 

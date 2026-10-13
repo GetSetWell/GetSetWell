@@ -1,8 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/push_notification_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
@@ -30,6 +33,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
   int _currentStep = 1;
   bool _showFemaleOnly = false;
+  bool _isSubmitting = false;
 
   String? _selectedGoal;
 
@@ -81,6 +85,10 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     _trainerRepository = TrainerRepository(Supabase.instance.client);
 
     _loadOptions();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _askForMatchNotifications();
+    });
   }
 
   @override
@@ -230,46 +238,54 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   }
 
   Future<void> _continueFromHelpMeChoose() async {
-    final draft = ConciergeMatchPayload(
-      goal: _selectedGoal!,
-      preferredDays: _selectedDays.toList(),
-      preferredTime: _selectedTime!,
-      trainingLocationId: _selectedLocation!.id,
-      trainingLocationName: _locationLabel(_selectedLocation!),
-      preferredArea: _preferredAreaController.text.trim(),
-      budgetMin: _selectedBudgetMin,
-      budgetMax: _selectedBudgetMax,
-      femaleTrainerOnly: _showFemaleOnly,
-      languagePreference: _selectedLanguage,
-      message: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-    );
+    if (_isSubmitting) return;
 
-    final intent = AuthFlowIntent.conciergeMatch(draft);
-    final session = Supabase.instance.client.auth.currentSession;
+    setState(() {
+      _isSubmitting = true;
+    });
 
-    // Onboarding must always verify the phone number,
-    // even if an old Supabase session still exists.
-    if (widget.requireAuth) {
+    try {
+      final draft = ConciergeMatchPayload(
+        goal: _selectedGoal!,
+        preferredDays: _selectedDays.toList(),
+        preferredTime: _selectedTime!,
+        trainingLocationId: _selectedLocation!.id,
+        trainingLocationName: _locationLabel(_selectedLocation!),
+        preferredArea: _preferredAreaController.text.trim(),
+        budgetMin: _selectedBudgetMin,
+        budgetMax: _selectedBudgetMax,
+        femaleTrainerOnly: _showFemaleOnly,
+        languagePreference: _selectedLanguage,
+        message: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+      );
+
+      final intent = AuthFlowIntent.conciergeMatch(draft);
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (widget.requireAuth) {
+        if (!mounted) return;
+
+        await context.push(GSWRoutes.userAuth, extra: intent);
+
+        return;
+      }
+
+      if (user != null) {
+        await resolveAuthFlow(context, intent);
+        return;
+      }
+
       if (!mounted) return;
 
-      context.push(GSWRoutes.userAuth, extra: intent);
-
-      return;
+      await context.push(GSWRoutes.userAuth, extra: intent);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
-
-    // Signed-in users already have a verified identity.
-    // Skip phone + OTP and continue directly with the concierge request.
-    if (session != null) {
-      await resolveAuthFlow(context, intent);
-      return;
-    }
-
-    // Signed-out users still follow the normal phone -> OTP auth flow.
-    if (!mounted) return;
-
-    context.push(GSWRoutes.userAuth, extra: intent);
   }
-
   // ---------------------------------------------------------------------------
   // VALIDATION
   // ---------------------------------------------------------------------------
@@ -594,7 +610,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
           size: GSWTextFieldSize.large,
           controller: _preferredAreaController,
           label: 'Preferred area',
-          hintText: 'Dubai Marina',
+          hintText: 'e.g. Dubai Marina ',
           textInputAction: TextInputAction.done,
           onChanged: (_) {
             setState(() {});
@@ -877,6 +893,85 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     );
   }
 
+  Future<void> _askForMatchNotifications() async {
+    final messaging = FirebaseMessaging.instance;
+
+    final currentSettings = await messaging.getNotificationSettings();
+
+    if (currentSettings.authorizationStatus != AuthorizationStatus.notDetermined) {
+      return;
+    }
+
+    if (!mounted) return;
+
+    final shouldEnable = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: GSWColors.backgroundSecondary,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Know when your match is ready',
+                  style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
+                ),
+
+                const SizedBox(height: 12),
+
+                Text(
+                  'We’ll notify you when we’ve found a trainer '
+                  'that fits your request.',
+                  style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                ),
+
+                const SizedBox(height: 24),
+
+                GSWButton(
+                  size: GSWButtonSize.large,
+                  variant: GSWButtonVariant.primary,
+                  label: 'Allow notifications',
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop(true);
+                  },
+                ),
+
+                const SizedBox(height: 8),
+
+                GSWButton(
+                  size: GSWButtonSize.large,
+                  variant: GSWButtonVariant.secondary,
+                  label: 'Not now',
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop(false);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (shouldEnable != true) return;
+
+    final settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+    if (settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional) {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user != null) {
+        await PushNotificationService().registerCurrentDevice();
+      }
+    }
+  }
+
   Widget _buildLanguages() {
     if (_availableLanguages.isEmpty) {
       return Text(
@@ -1039,9 +1134,15 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
               GSWButton(
                 size: GSWButtonSize.large,
-                variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
-                label: _currentStep == 4 ? 'Continue to send request' : 'Continue',
-                onPressed: !_canContinue
+                variant: _canContinue && !_isSubmitting
+                    ? GSWButtonVariant.primary
+                    : GSWButtonVariant.disabled,
+                label: _currentStep == 4 && _isSubmitting
+                    ? 'Sending...'
+                    : _currentStep == 4
+                    ? 'Continue to send request'
+                    : 'Continue',
+                onPressed: !_canContinue || _isSubmitting
                     ? null
                     : _currentStep == 4
                     ? _continueFromHelpMeChoose

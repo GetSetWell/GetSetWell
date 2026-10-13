@@ -1,5 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,22 +13,13 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  final fcmToken = await FirebaseMessaging.instance.getToken();
-
-  final notificationSettings = await FirebaseMessaging.instance
-      .requestPermission();
-
-  debugPrint(
-    'Notification permission: ${notificationSettings.authorizationStatus}',
-  );
-
-  debugPrint('FCM token: $fcmToken');
-
   await Supabase.initialize(
     url: SupabaseConfig.url,
     publishableKey: SupabaseConfig.publishableKey,
+    accessToken: () async {
+      return FirebaseAuth.instance.currentUser?.getIdToken();
+    },
   );
-
   runApp(const GetSetWellApp());
 
   final pushNotificationService = PushNotificationService();

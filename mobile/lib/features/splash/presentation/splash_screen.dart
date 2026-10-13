@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -42,7 +43,15 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    context.go(GSWRoutes.onboarding);
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+
+    if (!mounted) return;
+
+    if (firebaseUser != null) {
+      context.go(GSWRoutes.home);
+    } else {
+      context.go(GSWRoutes.onboarding);
+    }
   }
 
   @override
@@ -59,10 +68,7 @@ class _SplashScreenState extends State<SplashScreen> {
               offset: _moveLogo ? const Offset(0, -0.25) : Offset.zero,
               duration: const Duration(seconds: 1),
               curve: Curves.easeOutCubic,
-              child: Image.asset(
-                'assets/logos/splash_logo_flutter.png',
-                width: 100,
-              ),
+              child: Image.asset('assets/logos/splash_logo_flutter.png', width: 100),
             ),
 
             AnimatedOpacity(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
@@ -28,11 +29,7 @@ class _ConciergeRequestStatusScreenState extends State<ConciergeRequestStatusScr
   }
 
   Future<_ConciergeRequestData> _loadRequest() async {
-    final user = _client.auth.currentUser;
-
-    if (user == null) {
-      throw Exception('Authentication required.');
-    }
+    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
 
     final row = await _client
         .from('booking_requests')
@@ -56,7 +53,7 @@ class _ConciergeRequestStatusScreenState extends State<ConciergeRequestStatusScr
           )
         ''')
         .eq('id', widget.requestId)
-        .eq('user_id', user.id)
+        .eq('user_id', customerId)
         .eq('request_type', 'concierge_match')
         .maybeSingle();
 
@@ -167,17 +164,13 @@ class _ConciergeRequestStatusScreenState extends State<ConciergeRequestStatusScr
     });
 
     try {
-      final user = _client.auth.currentUser;
-
-      if (user == null) {
-        throw Exception('Authentication required.');
-      }
+      final customerId = await CustomerIdentityService(client: _client).getCustomerId();
 
       await _client
           .from('booking_requests')
           .update({'status': 'cancelled'})
           .eq('id', request.id)
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .eq('request_type', 'concierge_match');
 
       if (!mounted) return;

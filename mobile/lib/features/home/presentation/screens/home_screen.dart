@@ -1,11 +1,15 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/common/header.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
 import 'package:mobile/features/booking/data/services/active_concierge_match_service.dart';
+import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
+import 'package:mobile/features/sessions/presentation/screens/session_confirmation_flow.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_card.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_matching_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final ActiveConciergeMatchService _activeConciergeMatchService;
 
   late Future<bool> _hasActiveMatchFuture;
+  bool _didCheckSessionPrompt = false;
 
   @override
   void initState() {
@@ -40,6 +45,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _homeDataFuture = _loadHomeData();
     _hasActiveMatchFuture = _activeConciergeMatchService.hasActiveMatch();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowPendingSessionPrompt();
+    });
   }
 
   @override
@@ -120,11 +128,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<_HomeData> _loadHomeData() async {
-    final user = _client.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       return const _HomeData();
     }
+    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
 
     String? fullName;
     String? city;
@@ -133,7 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final profile = await _client
           .from('customer_profiles')
           .select('full_name, city')
-          .eq('id', user.id)
+          .eq('id', customerId)
           .maybeSingle();
 
       fullName = profile?['full_name']?.toString().trim();
@@ -166,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
     name
   )
 ''')
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .eq('request_type', 'concierge_match')
           .order('created_at', ascending: false)
           .limit(20);
@@ -239,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .select(
             'id, booking_request_id, trainer_id, scheduled_at, location_label, status, trainers(full_name)',
           )
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .eq('status', 'confirmed')
           .gte('scheduled_at', nowUtc)
           .order('scheduled_at', ascending: true)
@@ -279,6 +288,155 @@ class _HomeScreenState extends State<HomeScreen> {
         _buildMatchingCardIfAllowed(),
       ],
     );
+  }
+
+  Future<void> _maybeShowPendingSessionPrompt() async {
+    if (_didCheckSessionPrompt || !mounted) return;
+
+    _didCheckSessionPrompt = true;
+
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) return;
+    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
+    try {
+      final rows = await _client
+          .from('sessions')
+          .select('''
+  id,
+  booking_request_id,
+  trainer_id,
+  scheduled_at,
+  location_label,
+  customer_training_place,
+  venue_choice,
+  goal,
+  notes,
+  status,
+  completion_prompt_shown_at,
+  customer_outcome,
+  trainers(
+    full_name,
+    profile_image_url,
+    price_per_session
+  )
+''')
+          .eq('user_id', customerId)
+          .inFilter('status', ['confirmed', 'booked'])
+          .order('scheduled_at', ascending: false);
+
+      final nowUtc = DateTime.now().toUtc();
+
+      Map<String, dynamic>? pendingSession;
+
+      for (final rawRow in rows) {
+        final session = Map<String, dynamic>.from(rawRow);
+
+        final outcome = session['customer_outcome']?.toString().trim() ?? '';
+
+        final shownAt = session['completion_prompt_shown_at']?.toString().trim() ?? '';
+
+        final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
+
+        if (scheduledAt == null || outcome.isNotEmpty || shownAt.isNotEmpty) {
+          continue;
+        }
+
+        final sessionEndUtc = scheduledAt.toUtc().add(const Duration(hours: 1));
+
+        final confirmationDeadline = sessionEndUtc.add(const Duration(hours: 24));
+
+        if (!nowUtc.isBefore(sessionEndUtc) && nowUtc.isBefore(confirmationDeadline)) {
+          pendingSession = session;
+          break;
+        }
+      }
+
+      if (!mounted || pendingSession == null) {
+        return;
+      }
+
+      final sessionId = pendingSession['id']?.toString() ?? '';
+
+      await _client.rpc(
+        'mark_session_completion_prompt_shown',
+        params: {'p_session_id': sessionId},
+      );
+
+      if (!mounted) return;
+
+      await showSessionConfirmationFlow(
+        context: context,
+        session: pendingSession,
+        onBookAgain: (session) async {
+          await _startRepeatBookingFromHome(session);
+        },
+        onFinished: () async {
+          await _refreshHomeData();
+        },
+      );
+    } catch (error) {
+      debugPrint('Home session confirmation check failed: $error');
+    }
+  }
+
+  Future<void> _startRepeatBookingFromHome(Map<String, dynamic> session) async {
+    final trainerId = session['trainer_id']?.toString().trim() ?? '';
+
+    final bookingRequestId = session['booking_request_id']?.toString().trim() ?? '';
+
+    if (trainerId.isEmpty) return;
+
+    try {
+      final trainers = await _trainerRepository.getTrainers();
+
+      Trainer? selectedTrainer;
+
+      for (final trainer in trainers) {
+        if (trainer.id == trainerId) {
+          selectedTrainer = trainer;
+          break;
+        }
+      }
+
+      if (!mounted || selectedTrainer == null) {
+        return;
+      }
+
+      Map<String, dynamic>? previousBooking;
+
+      if (bookingRequestId.isNotEmpty) {
+        final row = await _client
+            .from('booking_requests')
+            .select('''
+            goal,
+            message
+          ''')
+            .eq('id', bookingRequestId)
+            .maybeSingle();
+
+        if (row != null) {
+          previousBooking = Map<String, dynamic>.from(row);
+        }
+      }
+
+      if (!mounted) return;
+
+      context.push(
+        GSWRoutes.bookingRequest,
+        extra: BookingRequestRouteData(
+          trainer: selectedTrainer,
+          initialGoal:
+              session['goal']?.toString().trim() ?? previousBooking?['goal']?.toString().trim(),
+          initialLocationLabel: session['location_label']?.toString().trim(),
+          initialNotes:
+              session['notes']?.toString().trim() ?? previousBooking?['message']?.toString().trim(),
+          isRepeatBooking: true,
+        ),
+      );
+    } catch (error) {
+      debugPrint('Home repeat booking failed: $error');
+    }
   }
 
   Widget _buildMatchingInProgressCard(_HomeRequest request) {

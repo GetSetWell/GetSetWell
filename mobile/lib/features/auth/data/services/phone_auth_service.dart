@@ -1,19 +1,30 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'firebase_phone_verification_service.dart';
 
 class PhoneAuthService {
-  PhoneAuthService({SupabaseClient? client})
-    : _client = client ?? Supabase.instance.client;
+  PhoneAuthService({FirebasePhoneVerificationService? firebaseService})
+    : _firebaseService = firebaseService ?? FirebasePhoneVerificationService();
 
-  final SupabaseClient _client;
+  final FirebasePhoneVerificationService _firebaseService;
+
+  String? _verificationId;
 
   Future<void> sendOtp({required String phone}) async {
-    await _client.auth.signInWithOtp(phone: phone);
+    _verificationId = await _firebaseService.sendTestOtp(phone: phone);
   }
 
-  Future<AuthResponse> verifyOtp({
+  Future<String> verifyOtp({
     required String phone,
     required String otp,
+    String? verificationId,
   }) async {
-    return _client.auth.verifyOTP(phone: phone, token: otp, type: OtpType.sms);
+    final id = verificationId ?? _verificationId;
+
+    if (id == null || id.isEmpty) {
+      throw StateError('Firebase verification ID is missing.');
+    }
+
+    return _firebaseService.verifyTestOtp(verificationId: id, otp: otp);
   }
+
+  String? get verificationId => _verificationId;
 }

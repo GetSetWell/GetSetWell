@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/profile/model/profile_photo_bottomsheet.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -76,7 +78,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
-    final user = _supabase.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       if (!mounted) return;
@@ -88,6 +90,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       return;
     }
+    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
 
     try {
       final profile = await _supabase
@@ -100,7 +103,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             city,
             profile_photo_path
           ''')
-          .eq('id', user.id)
+          .eq('id', customerId)
           .maybeSingle();
 
       if (!mounted) return;
@@ -117,7 +120,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             .createSignedUrl(photoPath, 60 * 60);
       }
 
-      final profilePhone = profile?['phone']?.toString().trim() ?? user.phone?.trim() ?? '';
+      final profilePhone = profile?['phone']?.toString().trim() ?? user.phoneNumber?.trim() ?? '';
 
       final email = profile?['email']?.toString().trim() ?? '';
 
@@ -146,7 +149,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _saveProfile() async {
     if (_isSaving) return;
 
-    final user = _supabase.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       _showMessage('Your session has expired. Please sign in again.');
@@ -170,6 +173,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _saveError = null;
     });
 
+    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
     try {
       await _supabase
           .from('customer_profiles')
@@ -178,7 +183,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             'email': _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
-          .eq('id', user.id);
+          .eq('id', customerId);
 
       if (!mounted) return;
 
@@ -202,19 +207,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _uploadProfilePhoto(XFile image) async {
-    final user = _supabase.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       _showMessage('Your session has expired. Please sign in again.');
       return;
     }
 
+    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
     try {
       final bytes = await image.readAsBytes();
 
       final extension = image.name.contains('.') ? image.name.split('.').last.toLowerCase() : 'jpg';
 
-      final storagePath = '${user.id}/profile.$extension';
+      final storagePath = '$customerId/profile.$extension';
 
       await _supabase.storage
           .from('profile-photos')
@@ -226,7 +233,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             'profile_photo_path': storagePath,
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
-          .eq('id', user.id);
+          .eq('id', customerId);
 
       final photoUrl = await _supabase.storage
           .from('profile-photos')
@@ -250,7 +257,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _removeProfilePhoto() async {
-    final user = _supabase.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       _showMessage('Your session has expired. Please sign in again.');
@@ -262,6 +269,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (photoPath == null || photoPath.isEmpty) {
       return;
     }
+    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
 
     try {
       await _supabase.storage.from('profile-photos').remove([photoPath]);
@@ -272,7 +280,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             'profile_photo_path': null,
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
-          .eq('id', user.id);
+          .eq('id', customerId);
 
       if (!mounted) return;
 
@@ -325,14 +333,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     await _uploadProfilePhoto(image);
   }
 
-  void _handleChangeNumber() {
+  Future<void> _handleChangeNumber() async {
     if (widget.onChangeNumber != null) {
       widget.onChangeNumber!();
       return;
     }
 
-    context.push(GSWRoutes.userAuth);
-    _showMessage('Phone number change will require a new verification code.');
+    final changed = await context.push<bool>(GSWRoutes.changePhone, extra: _phone);
+
+    if (!mounted) return;
+
+    if (changed == true) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      await _loadProfile();
+
+      if (!mounted) return;
+
+      _showMessage('Your mobile number has been updated.');
+    }
   }
 
   void _showMessage(String message) {

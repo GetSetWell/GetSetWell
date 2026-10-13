@@ -1,3 +1,4 @@
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/booking/domain/models/booking_request_result.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
 import 'package:mobile/features/booking/domain/models/trainer_request_payload.dart';
@@ -53,11 +54,7 @@ class BookingRequestService {
   }
 
   Future<List<Map<String, dynamic>>> getMyRequests() async {
-    final user = _client.auth.currentUser;
-
-    if (user == null) {
-      return [];
-    }
+    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
 
     final rows = await _client
         .from('booking_requests')
@@ -87,7 +84,7 @@ class BookingRequestService {
         price_per_session
         )
       ''')
-        .eq('user_id', user.id)
+        .eq('user_id', customerId)
         .order('created_at', ascending: false);
 
     return rows.map<Map<String, dynamic>>((row) => Map<String, dynamic>.from(row)).toList();

@@ -1,11 +1,58 @@
+// GetSetWell booking requests: Firebase-authenticated customer flows.
+// All writes use a privileged Supabase client, so authentication and
+// customer ownership must be established before any insert or update.
 import { createClient } from "npm:@supabase/supabase-js@2";
-
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+} from "npm:jose@6";
+const FIREBASE_PROJECT_ID = "getsetwell-prod-510013";
+const firebasePublicKeys = createRemoteJWKSet(
+  new URL(
+    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com",
+  ),
+);
+type VerifiedFirebaseCustomer = {
+  firebaseUid: string;
+  phone: string;
+};
+async function verifyFirebaseCustomerToken(
+  token: string,
+): Promise<VerifiedFirebaseCustomer> {
+  const { payload } = await jwtVerify(
+    token,
+    firebasePublicKeys,
+    {
+      algorithms: ["RS256"],
+      issuer:
+        `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
+      audience: FIREBASE_PROJECT_ID,
+    },
+  );
+  const firebaseUid = payload.sub;
+  const phone = payload.phone_number;
+  const role = payload.role;
+  if (
+    typeof firebaseUid !== "string" ||
+    firebaseUid.length === 0 ||
+    firebaseUid.length > 128 ||
+    typeof phone !== "string" ||
+    !/^\+[1-9]\d{1,14}$/.test(phone) ||
+    role !== "authenticated" ||
+    typeof payload.auth_time !== "number"
+  ) {
+    throw new Error("AUTH_REQUIRED");
+  }
+  return {
+    firebaseUid,
+    phone,
+  };
+}
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
-
 const allowedDays = new Set<string>([
   "monday",
   "tuesday",
@@ -15,66 +62,49 @@ const allowedDays = new Set<string>([
   "saturday",
   "sunday",
 ]);
-
 const allowedTimes = new Set<string>([
   "morning",
   "afternoon",
   "evening",
 ]);
-
 const allowedTrainerPreferences = new Set<string>([
   "male",
   "female",
 ]);
-
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const uaeMobilePattern =
   /^\+971(50|52|54|55|56|58)\d{7}$/;
-
 const internationalPhonePattern =
   /^\+[1-9]\d{7,14}$/;
-
 type JsonObject = Record<string, unknown>;
-
 type RequestType =
   | "trainer_request"
   | "concierge_match";
-
 type TrainerAvailabilityRow = {
   id: string;
   gender: string | null;
   languages: string[] | null;
   price_per_session: number | null;
 };
-
 type TrainerLocationRelationRow = {
   trainer_id: string;
 };
-
 type AuthenticatedCustomer = {
   userId: string;
   fullName: string;
   phone: string;
   city: string;
 };
-
 const supabaseUrl =
   Deno.env.get("SUPABASE_URL");
-
 const serviceRoleKey =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
 if (!supabaseUrl || !serviceRoleKey) {
   throw new Error(
     "Missing Supabase environment variables",
   );
 }
-console.log(
-  "Function SUPABASE_URL:",
-  Deno.env.get("SUPABASE_URL"),
-);
 const supabaseAdmin = createClient(
   supabaseUrl,
   serviceRoleKey,
@@ -85,7 +115,6 @@ const supabaseAdmin = createClient(
     },
   },
 );
-
 function jsonResponse(
   body: JsonObject,
   status = 200,
@@ -101,7 +130,6 @@ function jsonResponse(
     },
   );
 }
-
 function isNonEmptyString(
   value: unknown,
   maxLength: number,
@@ -112,7 +140,6 @@ function isNonEmptyString(
     value.trim().length <= maxLength
   );
 }
-
 function isUuid(
   value: unknown,
 ): value is string {
@@ -121,12 +148,10 @@ function isUuid(
     uuidPattern.test(value)
   );
 }
-
 function validateRequestFields(
   body: JsonObject,
 ): string[] {
   const errors: string[] = [];
-
   if (
     !isNonEmptyString(
       body.goal,
@@ -137,7 +162,6 @@ function validateRequestFields(
       "goal is required",
     );
   }
-
   if (
     !Array.isArray(body.preferred_days) ||
     body.preferred_days.length === 0 ||
@@ -151,7 +175,6 @@ function validateRequestFields(
       "preferred_days is invalid",
     );
   }
-
   if (
     typeof body.preferred_time !==
       "string" ||
@@ -163,7 +186,6 @@ function validateRequestFields(
       "preferred_time is invalid",
     );
   }
-
   if (
     !isUuid(
       body.training_location_id,
@@ -173,7 +195,6 @@ function validateRequestFields(
       "training_location_id is invalid",
     );
   }
-
   if (
     !isNonEmptyString(
       body.preferred_area,
@@ -184,7 +205,6 @@ function validateRequestFields(
       "preferred_area is required",
     );
   }
-
   if (
     body.message !== undefined &&
     body.message !== null
@@ -198,16 +218,13 @@ function validateRequestFields(
       );
     }
   }
-
   return errors;
 }
-
 function validateTrainerRequest(
   body: JsonObject,
 ): string[] {
   const errors =
     validateRequestFields(body);
-
   // Keep the existing V1 trainer-request contract intact.
   if (
     !isNonEmptyString(
@@ -219,7 +236,6 @@ function validateTrainerRequest(
       "customer_name is required",
     );
   }
-
   if (
     typeof body.phone !== "string" ||
     !uaeMobilePattern.test(body.phone)
@@ -228,7 +244,6 @@ function validateTrainerRequest(
       "phone must be a valid UAE mobile number",
     );
   }
-
   if (
     body.share_details_consent !== true
   ) {
@@ -236,13 +251,11 @@ function validateTrainerRequest(
       "share_details_consent must be true",
     );
   }
-
   if (!isUuid(body.trainer_id)) {
     errors.push(
       "trainer_id is required",
     );
   }
-
   if (
     body.trainer_gender_preference !==
       undefined ||
@@ -254,7 +267,6 @@ function validateTrainerRequest(
       "trainer request contains concierge-only fields",
     );
   }
-
   return errors;
 }
 const allowedTrainingPlaces = new Set<string>([
@@ -262,7 +274,6 @@ const allowedTrainingPlaces = new Set<string>([
   "home",
   "outdoors",
 ]);
-
 const allowedVenueChoices = new Set<string>([
   "customer_choice",
   "trainer_private_gym",
@@ -271,14 +282,12 @@ function validateTrainerSessionRequest(
   body: JsonObject,
 ): string[] {
   const errors: string[] = [];
-
   // Specific trainer is required.
   if (!isUuid(body.trainer_id)) {
     errors.push(
       "trainer_id is required",
     );
   }
-
   // Exact session date/time is required.
   if (
     typeof body.scheduled_at !== "string" ||
@@ -290,7 +299,6 @@ function validateTrainerSessionRequest(
       "scheduled_at is invalid",
     );
   }
-
   // Customer's original location preference.
   if (
     typeof body.customer_training_place !==
@@ -303,7 +311,6 @@ function validateTrainerSessionRequest(
       "customer_training_place is invalid",
     );
   }
-
   // Whether they use their chosen place
   // or the trainer's private gym.
   if (
@@ -317,7 +324,6 @@ function validateTrainerSessionRequest(
       "venue_choice is invalid",
     );
   }
-
   // Final human-readable session location.
   if (
     !isNonEmptyString(
@@ -329,7 +335,6 @@ function validateTrainerSessionRequest(
       "location_label is required",
     );
   }
-
   // Prices sent by Flutter for now.
   // We will verify these against trainer/backend
   // prices in the database-validation step.
@@ -344,7 +349,6 @@ function validateTrainerSessionRequest(
       "session_rate is invalid",
     );
   }
-
   if (
     typeof body.service_fee !== "number" ||
     !Number.isFinite(
@@ -356,7 +360,6 @@ function validateTrainerSessionRequest(
       "service_fee is invalid",
     );
   }
-
   if (
     typeof body.total !== "number" ||
     !Number.isFinite(body.total) ||
@@ -366,7 +369,6 @@ function validateTrainerSessionRequest(
       "total is invalid",
     );
   }
-
   // Goal is optional in direct booking.
   if (
     body.goal !== undefined &&
@@ -380,7 +382,6 @@ function validateTrainerSessionRequest(
       "goal is invalid",
     );
   }
-
   // Notes are optional.
   if (
     body.message !== undefined &&
@@ -395,7 +396,6 @@ function validateTrainerSessionRequest(
       );
     }
   }
-
   // Current dummy payment methods.
   if (
     body.payment_method !== "card" &&
@@ -405,17 +405,14 @@ function validateTrainerSessionRequest(
       "payment_method is invalid",
     );
   }
-
   return errors;
 }
 async function validateTrainerSessionDatabaseRules(
   body: JsonObject,
 ): Promise<string[]> {
   const errors: string[] = [];
-
   const trainerId =
     body.trainer_id as string;
-
   const {
     data: trainer,
     error: trainerError,
@@ -431,11 +428,9 @@ async function validateTrainerSessionDatabaseRules(
     `)
     .eq("id", trainerId)
     .maybeSingle();
-
   if (trainerError) {
     throw trainerError;
   }
-
   if (
     !trainer ||
     trainer.is_active !== true ||
@@ -445,21 +440,16 @@ async function validateTrainerSessionDatabaseRules(
       "trainer is no longer available",
     ];
   }
-
   const venueChoice =
     body.venue_choice as string;
-
   const customerTrainingPlace =
     body.customer_training_place as string;
-
   const locationLabel =
     body.location_label as string;
-
   const standardRate =
     Number(
       trainer.price_per_session,
     );
-
   if (
     !Number.isFinite(standardRate) ||
     standardRate <= 0
@@ -468,10 +458,8 @@ async function validateTrainerSessionDatabaseRules(
       "trainer session price is unavailable",
     ];
   }
-
   let expectedSessionRate =
     standardRate;
-
   if (
     venueChoice ===
       "trainer_private_gym"
@@ -480,13 +468,11 @@ async function validateTrainerSessionDatabaseRules(
       Number(
         trainer.gym_price_per_session,
       );
-
     const gymLocation =
       typeof trainer.gym_location_label ===
         "string"
         ? trainer.gym_location_label.trim()
         : "";
-
     if (
       !Number.isFinite(gymRate) ||
       gymRate <= 0 ||
@@ -498,7 +484,6 @@ async function validateTrainerSessionDatabaseRules(
     } else {
       expectedSessionRate =
         gymRate;
-
       if (
         locationLabel.trim() !==
         gymLocation
@@ -509,7 +494,6 @@ async function validateTrainerSessionDatabaseRules(
       }
     }
   }
-
   if (
     venueChoice ===
       "customer_choice" &&
@@ -521,30 +505,23 @@ async function validateTrainerSessionDatabaseRules(
       "customer training place is invalid",
     );
   }
-
   const expectedServiceFee =
     expectedSessionRate * 0.05;
-
   const expectedTotal =
     expectedSessionRate +
     expectedServiceFee;
-
   const submittedSessionRate =
     Number(body.session_rate);
-
   const submittedServiceFee =
     Number(body.service_fee);
-
   const submittedTotal =
     Number(body.total);
-
   const moneyMatches = (
     left: number,
     right: number,
   ) =>
     Math.abs(left - right) <
     0.01;
-
   if (
     !moneyMatches(
       submittedSessionRate,
@@ -555,7 +532,6 @@ async function validateTrainerSessionDatabaseRules(
       "session rate does not match backend price",
     );
   }
-
   if (
     !moneyMatches(
       submittedServiceFee,
@@ -566,7 +542,6 @@ async function validateTrainerSessionDatabaseRules(
       "service fee does not match backend price",
     );
   }
-
   if (
     !moneyMatches(
       submittedTotal,
@@ -577,7 +552,6 @@ async function validateTrainerSessionDatabaseRules(
       "total does not match backend price",
     );
   }
-
   return errors;
 }
 function validateConciergeMatch(
@@ -585,7 +559,6 @@ function validateConciergeMatch(
 ): string[] {
   const errors =
     validateRequestFields(body);
-
   // Identity for Help Me Choose now comes from the authenticated
   // Supabase user and customer_profiles, never from Flutter.
   if (
@@ -597,7 +570,6 @@ function validateConciergeMatch(
       "concierge_match must not contain customer identity fields",
     );
   }
-
   if (
     body.share_details_consent !== undefined
   ) {
@@ -605,13 +577,11 @@ function validateConciergeMatch(
       "concierge_match must not contain share_details_consent",
     );
   }
-
   if (body.trainer_id !== undefined) {
     errors.push(
       "concierge_match must not contain trainer_id",
     );
   }
-
   if (
     body.trainer_gender_preference !==
       undefined &&
@@ -631,31 +601,25 @@ function validateConciergeMatch(
       );
     }
   }
-
   const hasBudgetMin =
     body.budget_min !== undefined &&
     body.budget_min !== null;
-
   const hasBudgetMax =
     body.budget_max !== undefined &&
     body.budget_max !== null;
-
   if (hasBudgetMin !== hasBudgetMax) {
     errors.push(
       "budget_min and budget_max must be provided together",
     );
   }
-
   if (
     hasBudgetMin &&
     hasBudgetMax
   ) {
     const budgetMin =
       body.budget_min;
-
     const budgetMax =
       body.budget_max;
-
     if (
       typeof budgetMin !== "number" ||
       typeof budgetMax !== "number" ||
@@ -669,7 +633,6 @@ function validateConciergeMatch(
       );
     }
   }
-
   if (
     body.language_preference !==
       undefined &&
@@ -683,7 +646,6 @@ function validateConciergeMatch(
       "language_preference is invalid",
     );
   }
-
   return errors;
 }
 async function getAuthenticatedCustomer(
@@ -691,45 +653,47 @@ async function getAuthenticatedCustomer(
 ): Promise<AuthenticatedCustomer> {
   const authorization =
     req.headers.get("authorization");
-
   if (
     !authorization ||
     !authorization.startsWith("Bearer ")
   ) {
     throw new Error("AUTH_REQUIRED");
   }
-
   const token =
     authorization.slice(7).trim();
-
   if (token.length === 0) {
     throw new Error("AUTH_REQUIRED");
   }
-
-  const {
-    data: userData,
-    error: userError,
-  } = await supabaseAdmin.auth.getUser(
-    token,
-  );
-
-  if (
-    userError ||
-    !userData.user
-  ) {
-    console.error(
-      "Auth user lookup failed:",
-      userError,
-    );
-
-    throw new Error(
-      "AUTH_REQUIRED",
-    );
-  }
-
-  const user =
-    userData.user;
-
+// Verify the Firebase ID token using Google's public keys.
+let verifiedCustomer: VerifiedFirebaseCustomer;
+try {
+  verifiedCustomer = await verifyFirebaseCustomerToken(token);
+} catch (error) {
+  console.error("Firebase token verification failed:", error);
+  throw new Error("AUTH_REQUIRED");
+}
+// Resolve the Firebase UID to our existing customer UUID.
+// Never accept a customer ID supplied by Flutter.
+const {
+  data: identity,
+  error: identityError,
+} = await supabaseAdmin
+  .from("customer_identities")
+  .select("id")
+  .eq("firebase_uid", verifiedCustomer.firebaseUid)
+  .maybeSingle();
+if (identityError) {
+  console.error("Customer identity lookup failed:", identityError);
+  throw new Error("AUTH_REQUIRED");
+}
+if (!identity) {
+  throw new Error("CUSTOMER_IDENTITY_NOT_FOUND");
+}
+// Retain the structure expected by the existing booking logic.
+const user = {
+  id: identity.id as string,
+  phone: verifiedCustomer.phone,
+};
   const {
     data: profile,
     error: profileError,
@@ -743,7 +707,6 @@ async function getAuthenticatedCustomer(
       user.id,
     )
     .maybeSingle();
-
   if (profileError) {
     console.error(
       "Customer profile query failed:",
@@ -760,37 +723,30 @@ async function getAuthenticatedCustomer(
           user.id,
       },
     );
-
     throw new Error(
       `PROFILE_QUERY_FAILED:${profileError.message}`,
     );
   }
-
   const fullName =
     typeof profile?.full_name === "string"
         ? profile.full_name.trim()
         : "";
-
   const city =
     typeof profile?.city === "string"
         ? profile.city.trim()
         : "";
-
   const authPhone =
     typeof user.phone === "string"
         ? user.phone.trim()
         : "";
-
   const profilePhone =
     typeof profile?.phone === "string"
         ? profile.phone.trim()
         : "";
-
   const phone =
     authPhone.length > 0
         ? authPhone
         : profilePhone;
-
   if (
     profile == null ||
     fullName.length === 0 ||
@@ -807,12 +763,10 @@ async function getAuthenticatedCustomer(
         hasPhone: phone.length > 0,
       },
     );
-
     throw new Error(
       "PROFILE_INCOMPLETE",
     );
   }
-
   console.log(
     "Authenticated customer loaded:",
     {
@@ -828,7 +782,6 @@ async function getAuthenticatedCustomer(
           true,
     },
   );
-
   return {
     userId:
         user.id,
@@ -837,23 +790,19 @@ async function getAuthenticatedCustomer(
     city,
   };
 }
-
 function attachAuthenticatedCustomer(
   body: JsonObject,
   customer: AuthenticatedCustomer,
 ): JsonObject {
   return {
     ...body,
-
     user_id: customer.userId,
     customer_name: customer.fullName,
     phone: customer.phone,
-
     // Preserve the existing server-managed booking_requests field.
     share_details_consent: true,
   };
 }
-
 async function getActiveVerifiedTrainers():
   Promise<TrainerAvailabilityRow[]> {
   const { data, error } =
@@ -869,16 +818,13 @@ async function getActiveVerifiedTrainers():
       )
       .eq("is_active", true)
       .eq("is_verified", true);
-
   if (error) {
     throw error;
   }
-
   return (
     (data ?? []) as TrainerAvailabilityRow[]
   );
 }
-
 async function isActiveTrainingLocation(
   locationId: string,
 ): Promise<boolean> {
@@ -889,14 +835,11 @@ async function isActiveTrainingLocation(
       .eq("id", locationId)
       .eq("is_active", true)
       .maybeSingle();
-
   if (error) {
     throw error;
   }
-
   return data !== null;
 }
-
 async function trainerSupportsLocation(
   trainerId: string,
   locationId: string,
@@ -913,14 +856,11 @@ async function trainerSupportsLocation(
         locationId,
       )
       .maybeSingle();
-
   if (error) {
     throw error;
   }
-
   return data !== null;
 }
-
 async function locationHasActiveTrainer(
   locationId: string,
 ): Promise<boolean> {
@@ -934,25 +874,20 @@ async function locationHasActiveTrainer(
       "training_location_id",
       locationId,
     );
-
   if (relationError) {
     throw relationError;
   }
-
   const relationships =
     (relationData ?? []) as
       TrainerLocationRelationRow[];
-
   if (relationships.length === 0) {
     return false;
   }
-
   const trainerIds =
     relationships.map(
       (relationship) =>
         relationship.trainer_id,
     );
-
   const {
     data: trainerData,
     error: trainerError,
@@ -962,59 +897,48 @@ async function locationHasActiveTrainer(
     .in("id", trainerIds)
     .eq("is_active", true)
     .eq("is_verified", true);
-
   if (trainerError) {
     throw trainerError;
   }
-
   return (
     trainerData !== null &&
     trainerData.length > 0
   );
 }
-
 async function validateDatabaseRules(
   body: JsonObject,
   requestType: RequestType,
 ): Promise<string[]> {
   const errors: string[] = [];
-
   const locationId =
     body.training_location_id;
-
   if (!isUuid(locationId)) {
     return [
       "training_location_id is invalid",
     ];
   }
-
   const locationIsActive =
     await isActiveTrainingLocation(
       locationId,
     );
-
   if (!locationIsActive) {
     return [
       "training location is no longer available",
     ];
   }
-
   // ----------------------------------------------------------
   // Specific trainer request
   // ----------------------------------------------------------
-
   if (
     requestType === "trainer_request"
   ) {
     const trainerId =
       body.trainer_id;
-
     if (!isUuid(trainerId)) {
       return [
         "trainer_id is invalid",
       ];
     }
-
     const {
       data: trainer,
       error,
@@ -1025,50 +949,40 @@ async function validateDatabaseRules(
       .eq("is_active", true)
       .eq("is_verified", true)
       .maybeSingle();
-
     if (error) {
       throw error;
     }
-
     if (!trainer) {
       return [
         "trainer is no longer available",
       ];
     }
-
     const supportsLocation =
       await trainerSupportsLocation(
         trainerId,
         locationId,
       );
-
     if (!supportsLocation) {
       errors.push(
         "selected training location is not available for this trainer",
       );
     }
-
     return errors;
   }
-
   // ----------------------------------------------------------
   // Help me choose
   // ----------------------------------------------------------
-
   const locationAvailable =
     await locationHasActiveTrainer(
       locationId,
     );
-
   if (!locationAvailable) {
     errors.push(
       "selected training location is no longer available",
     );
   }
-
   const trainers =
     await getActiveVerifiedTrainers();
-
   if (
     typeof body
         .trainer_gender_preference ===
@@ -1078,7 +992,6 @@ async function validateDatabaseRules(
       body.trainer_gender_preference
         .trim()
         .toLowerCase();
-
     const genderAvailable =
       trainers.some((trainer) => {
         return (
@@ -1090,14 +1003,12 @@ async function validateDatabaseRules(
             requestedGender
         );
       });
-
     if (!genderAvailable) {
       errors.push(
         "trainer preference is currently unavailable",
       );
     }
   }
-
   if (
     typeof body.language_preference ===
       "string"
@@ -1106,16 +1017,13 @@ async function validateDatabaseRules(
       body.language_preference
         .trim()
         .toLowerCase();
-
     const languageAvailable =
       trainers.some((trainer) => {
         const languages =
           trainer.languages;
-
         if (!Array.isArray(languages)) {
           return false;
         }
-
         return languages.some(
           (language) =>
             typeof language === "string" &&
@@ -1125,14 +1033,12 @@ async function validateDatabaseRules(
               requestedLanguage,
         );
       });
-
     if (!languageAvailable) {
       errors.push(
         "language preference is currently unavailable",
       );
     }
   }
-
   if (
     typeof body.budget_min ===
       "number" &&
@@ -1141,31 +1047,26 @@ async function validateDatabaseRules(
   ) {
     const budgetMin =
       body.budget_min;
-
     const budgetMax =
       body.budget_max;
-
     const trainerInBudget =
       trainers.some((trainer) => {
         const price =
           Number(
             trainer.price_per_session,
           );
-
         return (
           Number.isFinite(price) &&
           price >= budgetMin &&
           price <= budgetMax
         );
       });
-
     if (!trainerInBudget) {
       errors.push(
         "budget preference is currently unavailable",
       );
     }
   }
-
   return errors;
 }
 function buildBookingRequestInsert(
@@ -1175,37 +1076,27 @@ function buildBookingRequestInsert(
     const isTrainerSessionRequest =
     requestType === "trainer_request" &&
     body.scheduled_at !== undefined;
-
   if (isTrainerSessionRequest) {
     const insertData: JsonObject = {
       request_type:
         "trainer_request",
-
       user_id:
         body.user_id,
-
       trainer_id:
         body.trainer_id,
-
       customer_name:
         body.customer_name,
-
       phone:
         body.phone,
-
       share_details_consent:
         true,
-
       consented_at:
         new Date().toISOString(),
-
       status:
         "new",
-
       source:
         "app",
     };
-
     if (
       typeof body.goal === "string" &&
       body.goal.trim().length > 0
@@ -1213,7 +1104,6 @@ function buildBookingRequestInsert(
       insertData.goal =
         body.goal.trim();
     }
-
     if (
       typeof body.message === "string" &&
       body.message.trim().length > 0
@@ -1221,44 +1111,35 @@ function buildBookingRequestInsert(
       insertData.message =
         body.message.trim();
     }
-
     return insertData;
   }
   const common: JsonObject = {
     request_type: requestType,
-
+    user_id: body.user_id,
     customer_name: body.customer_name,
     phone: body.phone,
     goal: body.goal,
-
     preferred_days: body.preferred_days,
     preferred_time: body.preferred_time,
-
     training_location_id:
       body.training_location_id,
-
     preferred_area: body.preferred_area,
-
     share_details_consent: true,
-
     // These values come from our server, never Flutter.
     consented_at: new Date().toISOString(),
     status: "new",
     source: "app",
   };
-
   if (
     typeof body.message === "string" &&
     body.message.trim().length > 0
   ) {
     common.message = body.message.trim();
   }
-
 if (requestType === "trainer_request") {
   return {
     ...common,
     trainer_id: body.trainer_id,
-
     ...(isUuid(body.source_concierge_request_id)
       ? {
           source_concierge_request_id:
@@ -1267,11 +1148,7 @@ if (requestType === "trainer_request") {
       : {}),
   };
 }
-
-  if (isUuid(body.user_id)) {
-    common.user_id = body.user_id;
-  }
-
+  
   // Help me choose fields
   if (
     typeof body.trainer_gender_preference ===
@@ -1280,7 +1157,6 @@ if (requestType === "trainer_request") {
     common.trainer_gender_preference =
       body.trainer_gender_preference;
   }
-
   if (
     typeof body.budget_min === "number" &&
     typeof body.budget_max === "number"
@@ -1288,7 +1164,6 @@ if (requestType === "trainer_request") {
     common.budget_min = body.budget_min;
     common.budget_max = body.budget_max;
   }
-
   if (
     typeof body.language_preference ===
       "string" &&
@@ -1297,10 +1172,8 @@ if (requestType === "trainer_request") {
     common.language_preference =
       body.language_preference.trim();
   }
-
   return common;
 }
-
 async function insertBookingRequest(
   body: JsonObject,
   requestType: RequestType,
@@ -1310,7 +1183,6 @@ async function insertBookingRequest(
       body,
       requestType,
     );
-
   const { data, error } =
     await supabaseAdmin
       .from("booking_requests")
@@ -1322,29 +1194,23 @@ async function insertBookingRequest(
         `,
       )
       .single();
-
   if (error) {
     throw error;
   }
-
   return data;
 }
-
 async function useExistingConciergeRequest(
   body: JsonObject,
 ) {
   const requestId =
     body.source_concierge_request_id;
-
   const userId =
     body.user_id;
-
   if (!isUuid(requestId) || !isUuid(userId)) {
     throw new Error(
       "INVALID_SOURCE_CONCIERGE_REQUEST",
     );
   }
-
   const {
     data: existingRequest,
     error: lookupError,
@@ -1362,17 +1228,14 @@ async function useExistingConciergeRequest(
     .eq("user_id", userId)
     .eq("request_type", "concierge_match")
     .maybeSingle();
-
   if (lookupError) {
     throw lookupError;
   }
-
   if (!existingRequest) {
     throw new Error(
       "SOURCE_CONCIERGE_REQUEST_NOT_FOUND",
     );
   }
-
   if (
     existingRequest.status !== "matched"
   ) {
@@ -1380,16 +1243,13 @@ async function useExistingConciergeRequest(
       "SOURCE_CONCIERGE_REQUEST_NOT_MATCHED",
     );
   }
-
   const trainerId =
     body.trainer_id;
-
   if (!isUuid(trainerId)) {
     throw new Error(
       "INVALID_TRAINER",
     );
   }
-
   const {
     data: updatedRequest,
     error: updateError,
@@ -1406,14 +1266,11 @@ async function useExistingConciergeRequest(
       reference_code
     `)
     .single();
-
   if (updateError) {
     throw updateError;
   }
-
   return updatedRequest;
 }
-
 async function insertConfirmedSession(
   body: JsonObject,
   bookingRequestId: string,
@@ -1423,43 +1280,53 @@ async function insertConfirmedSession(
     error,
   } = await supabaseAdmin
     .from("sessions")
-    .insert({
-      booking_request_id:
-        bookingRequestId,
-
-      user_id:
-        body.user_id,
-
-      trainer_id:
-        body.trainer_id,
-
-      scheduled_at:
-        body.scheduled_at,
-
-      location_label:
-        body.location_label,
-
-      status:
-        "confirmed",
-    })
+.insert({
+  booking_request_id:
+    bookingRequestId,
+  user_id:
+    body.user_id,
+  trainer_id:
+    body.trainer_id,
+  scheduled_at:
+    body.scheduled_at,
+  location_label:
+    body.location_label,
+  customer_training_place:
+    body.customer_training_place,
+  venue_choice:
+    body.venue_choice,
+  goal:
+    typeof body.goal === "string" &&
+    body.goal.trim().length > 0
+      ? body.goal.trim()
+      : null,
+  notes:
+    typeof body.message === "string" &&
+    body.message.trim().length > 0
+      ? body.message.trim()
+      : null,
+  status:
+    "confirmed",
+})
     .select(`
-      id,
-      booking_request_id,
-      user_id,
-      trainer_id,
-      scheduled_at,
-      location_label,
-      status
-    `)
+  id,
+  booking_request_id,
+  user_id,
+  trainer_id,
+  scheduled_at,
+  location_label,
+  customer_training_place,
+  venue_choice,
+  goal,
+  notes,
+  status
+`)
     .single();
-
   if (error) {
     throw error;
   }
-
   return data;
 }
-
 async function getTrainingLocationName(
   locationId: string,
 ): Promise<string> {
@@ -1468,14 +1335,11 @@ async function getTrainingLocationName(
     .select("name")
     .eq("id", locationId)
     .single();
-
   if (error) {
     throw error;
   }
-
   return data.name;
 }
-
 async function getTrainerName(
   trainerId: string,
 ): Promise<string> {
@@ -1484,14 +1348,11 @@ async function getTrainerName(
     .select("full_name")
     .eq("id", trainerId)
     .single();
-
   if (error) {
     throw error;
   }
-
   return data.full_name;
 }
-
 async function sendTelegramNotification(
   body: JsonObject,
   requestType: RequestType,
@@ -1499,42 +1360,33 @@ async function sendTelegramNotification(
 ): Promise<void> {
   const botToken =
     Deno.env.get("TELEGRAM_BOT_TOKEN");
-
   const chatId =
     Deno.env.get("TELEGRAM_CHAT_ID");
-
   if (!botToken || !chatId) {
     console.error(
       "Telegram secrets are missing",
     );
     return;
   }
-
   const locationId =
     body.training_location_id as string;
-
   const locationName =
     await getTrainingLocationName(
       locationId,
     );
-
   const days = Array.isArray(
     body.preferred_days,
   )
     ? body.preferred_days.join(", ")
     : "";
-
   let message = "";
-
   if (requestType === "trainer_request") {
     const trainerId =
       body.trainer_id as string;
-
     const trainerName =
       await getTrainerName(
         trainerId,
       );
-
     message = [
       "🟢 New GetSetWell Trainer Request",
       "",
@@ -1552,7 +1404,6 @@ async function sendTelegramNotification(
     ].join("\n");
   } else {
     const preferenceLines: string[] = [];
-
     if (
       typeof body.trainer_gender_preference ===
       "string"
@@ -1561,7 +1412,6 @@ async function sendTelegramNotification(
         `Trainer preference: ${body.trainer_gender_preference}`,
       );
     }
-
     if (
       typeof body.budget_min === "number" &&
       typeof body.budget_max === "number"
@@ -1570,7 +1420,6 @@ async function sendTelegramNotification(
         `Budget: AED ${body.budget_min}-${body.budget_max}`,
       );
     }
-
     if (
       typeof body.language_preference ===
       "string"
@@ -1579,7 +1428,6 @@ async function sendTelegramNotification(
         `Language: ${body.language_preference}`,
       );
     }
-
     message = [
       "🟢 New GetSetWell Match Request",
       "",
@@ -1596,7 +1444,6 @@ async function sendTelegramNotification(
       `WhatsApp: ${body.phone}`,
     ].join("\n");
   }
-
   const response = await fetch(
     `https://api.telegram.org/bot${botToken}/sendMessage`,
     {
@@ -1611,17 +1458,14 @@ async function sendTelegramNotification(
       }),
     },
   );
-
   if (!response.ok) {
     const telegramError =
       await response.text();
-
     throw new Error(
       `Telegram notification failed: ${telegramError}`,
     );
   }
 }
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(
@@ -1631,7 +1475,6 @@ Deno.serve(async (req: Request) => {
       },
     );
   }
-
   if (req.method !== "POST") {
     return jsonResponse(
       {
@@ -1640,13 +1483,15 @@ Deno.serve(async (req: Request) => {
       405,
     );
   }
-
+  // Protect the public endpoint from excessively large request bodies.
+  const contentLength = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > 16384) {
+    return jsonResponse({ error: "Request body too large" }, 413);
+  }
   let body: JsonObject;
-
   try {
     const parsedBody =
       await req.json();
-
     if (
       typeof parsedBody !== "object" ||
       parsedBody === null ||
@@ -1660,7 +1505,6 @@ Deno.serve(async (req: Request) => {
         400,
       );
     }
-
     body =
       parsedBody as JsonObject;
   } catch {
@@ -1671,14 +1515,11 @@ Deno.serve(async (req: Request) => {
       400,
     );
   }
-
   const requestType =
     body.request_type;
-
 const isTrainerSessionRequest =
   requestType === "trainer_request" &&
   body.scheduled_at !== undefined;
-
   if (
     requestType !==
       "trainer_request" &&
@@ -1692,7 +1533,6 @@ const isTrainerSessionRequest =
       400,
     );
   }
-
 const validationErrors =
   requestType === "trainer_request"
     ? isTrainerSessionRequest
@@ -1705,7 +1545,6 @@ const validationErrors =
     : validateConciergeMatch(
         body,
       );
-
   if (
     validationErrors.length > 0
   ) {
@@ -1719,22 +1558,15 @@ const validationErrors =
       400,
     );
   }
-
   let effectiveBody = body;
-
-  // Help Me Choose is now an authenticated flow.
-  // Customer identity comes from Supabase Auth + customer_profiles.
-  if (
-    requestType === "concierge_match" ||
-  isTrainerSessionRequest
-
-  ) {
+  // All booking paths require Firebase authentication. Never use a
+  // client-supplied customer UUID, name or phone as the source of identity.
+  {
     try {
       const customer =
         await getAuthenticatedCustomer(
           req,
         );
-
       effectiveBody =
         attachAuthenticatedCustomer(
           body,
@@ -1753,7 +1585,6 @@ const validationErrors =
           401,
         );
       }
-
       if (
         error instanceof Error &&
         error.message === "PROFILE_INCOMPLETE"
@@ -1769,7 +1600,6 @@ const validationErrors =
           409,
         );
       }
-
       if (
         error instanceof Error &&
         error.message.startsWith(
@@ -1781,12 +1611,10 @@ const validationErrors =
             "PROFILE_QUERY_FAILED:",
             "",
           );
-
         console.error(
           "Customer profile query failed:",
           profileMessage,
         );
-
         return jsonResponse(
           {
             error:
@@ -1797,12 +1625,10 @@ const validationErrors =
           500,
         );
       }
-
       console.error(
         "Customer profile lookup failed:",
         error,
       );
-
       return jsonResponse(
         {
           error:
@@ -1812,7 +1638,6 @@ const validationErrors =
       );
     }
   }
-
   try {
 const databaseErrors =
   isTrainerSessionRequest
@@ -1823,7 +1648,6 @@ const databaseErrors =
         effectiveBody,
         requestType,
       );
-
     if (
       databaseErrors.length > 0
     ) {
@@ -1842,7 +1666,6 @@ const databaseErrors =
       "Database validation failed:",
       error,
     );
-
     return jsonResponse(
       {
         error:
@@ -1851,17 +1674,13 @@ const databaseErrors =
       500,
     );
   }
-
   try {
 let bookingRequest;
-
 const sourceConciergeRequestId =
   effectiveBody.source_concierge_request_id;
-
 const isConciergeBooking =
   isTrainerSessionRequest &&
   isUuid(sourceConciergeRequestId);
-
 if (isConciergeBooking) {
   bookingRequest =
     await useExistingConciergeRequest(
@@ -1874,9 +1693,7 @@ if (isConciergeBooking) {
       requestType,
     );
 }
-
 let session = null;
-
 if (isTrainerSessionRequest) {
   try {
     session =
@@ -1899,7 +1716,6 @@ if (isTrainerSessionRequest) {
           "id",
           bookingRequest.id,
         );
-
       if (rollbackError) {
         console.error(
           "Concierge request rollback failed:",
@@ -1918,7 +1734,6 @@ if (isTrainerSessionRequest) {
           "id",
           bookingRequest.id,
         );
-
       if (cleanupError) {
         console.error(
           "Booking request cleanup failed:",
@@ -1926,7 +1741,6 @@ if (isTrainerSessionRequest) {
         );
       }
     }
-
     throw error;
   }
 }
@@ -1944,7 +1758,6 @@ if (!isTrainerSessionRequest) {
     );
   }
 }
-
 return jsonResponse(
   {
     success: true,
@@ -1952,16 +1765,12 @@ return jsonResponse(
     request_id: bookingRequest.id,
     reference_code:
       bookingRequest.reference_code,
-
     session_id:
       session?.id ?? null,
-
     scheduled_at:
       session?.scheduled_at ?? null,
-
     location_label:
       session?.location_label ?? null,
-
     status:
       session?.status ?? null,
   },
@@ -1972,36 +1781,8 @@ return jsonResponse(
       "Booking request insert failed:",
       error,
     );
-
-    const databaseError =
-      error !== null &&
-      typeof error === "object"
-        ? error as Record<string, unknown>
-        : {};
-
     return jsonResponse(
-      {
-        error:
-          "Unable to create request",
-        details: {
-          message:
-            typeof databaseError.message === "string"
-              ? databaseError.message
-              : String(error),
-          code:
-            typeof databaseError.code === "string"
-              ? databaseError.code
-              : null,
-          details:
-            typeof databaseError.details === "string"
-              ? databaseError.details
-              : null,
-          hint:
-            typeof databaseError.hint === "string"
-              ? databaseError.hint
-              : null,
-        },
-      },
+      { error: "Unable to create request" },
       500,
     );
   }

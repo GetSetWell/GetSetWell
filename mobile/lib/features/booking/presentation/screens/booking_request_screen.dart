@@ -15,26 +15,54 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class BookingRequestScreen extends StatefulWidget {
   const BookingRequestScreen({
     super.key,
+
     required this.trainer,
+
     this.initialGoal,
+
     this.sourceConciergeRequestId,
+
+    this.initialTrainingPlace,
+
+    this.initialVenueChoice,
+
+    this.initialLocationLabel,
+
+    this.initialNotes,
+
+    this.isRepeatBooking = false,
   });
 
   final Trainer trainer;
+
   final String? initialGoal;
+
   final String? sourceConciergeRequestId;
 
+  final CustomerTrainingPlace? initialTrainingPlace;
+
+  final BookingVenueChoice? initialVenueChoice;
+
+  final String? initialLocationLabel;
+
+  final String? initialNotes;
+
+  final bool isRepeatBooking;
+
   @override
-  State<BookingRequestScreen> createState() =>
-      _BookingRequestScreenState();
+  State<BookingRequestScreen> createState() => _BookingRequestScreenState();
 }
 
 // =============================================================================
+
 // PUBLIC CHECKOUT DATA
+
 // =============================================================================
 
 // =============================================================================
+
 // STATE
+
 // =============================================================================
 
 class _BookingRequestScreenState extends State<BookingRequestScreen> {
@@ -53,19 +81,25 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   BookingVenueChoice _venueChoice = BookingVenueChoice.customerChoice;
 
   DateTime? _selectedDate;
+
   String? _selectedTime;
 
   BookingPaymentMethod _paymentMethod = BookingPaymentMethod.card;
 
   double? _gymPrice;
+
   String? _gymLocationLabel;
 
-  static const List<String> _timeSlots = ['6:00 AM', '7:00 AM', '6:30 PM'];
+  List<DateTime> _availabilityStarts = const [];
+
+  bool _availabilityLoadFailed = false;
 
   Trainer get trainer => widget.trainer;
 
   // =============================================================================
+
   // BASIC TRAINER DATA
+
   // =============================================================================
 
   String get _trainerFirstName {
@@ -100,7 +134,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // DYNAMIC FLOW
+
   // =============================================================================
 
   int get _totalSteps {
@@ -124,7 +160,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // LOCATION
+
   // =============================================================================
 
   String get _customerLocationLabel {
@@ -172,7 +210,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // PRICE
+
   // =============================================================================
 
   double get _activeSessionRate {
@@ -192,37 +232,58 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // DATE
+
   // =============================================================================
 
   List<DateTime> get _availableDates {
-    final now = DateTime.now();
+    final nowDubai = _toDubai(DateTime.now());
 
-    return List.generate(7, (index) => DateTime(now.year, now.month, now.day + index));
+    final today = DateTime(nowDubai.year, nowDubai.month, nowDubai.day);
+
+    return List.generate(7, (index) => today.add(Duration(days: index)));
+  }
+
+  List<String> _timeSlotsForDate(DateTime date) {
+    final starts = _availabilityStarts.where((value) => _sameDate(value, date)).toList()..sort();
+
+    return starts.map(_timeLabel).toList();
+  }
+
+  bool _dateHasAvailability(DateTime date) {
+    return _availabilityStarts.any((value) => _sameDate(value, date));
   }
 
   // =============================================================================
+
   // VALIDATION
+
   // =============================================================================
 
   bool get _stepComplete {
     // STEP 1:
+
     // customer must pick location type AND enter preferred area.
+
     if (_currentStep == 1) {
       return _customerTrainingPlace != null && _preferredAreaController.text.trim().isNotEmpty;
     }
 
     // Optional private-gym comparison.
+
     if (_isVenueChoiceStep) {
       return true;
     }
 
     // Time.
+
     if (_isTimeStep) {
       return _selectedDate != null && _selectedTime != null;
     }
 
     // Review.
+
     if (_isReviewStep) {
       return true;
     }
@@ -231,12 +292,26 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // LIFECYCLE
+
   // =============================================================================
 
   @override
   void initState() {
     super.initState();
+
+    _customerTrainingPlace = widget.initialTrainingPlace;
+
+    _venueChoice = widget.initialVenueChoice ?? BookingVenueChoice.customerChoice;
+
+    if (widget.initialLocationLabel?.trim().isNotEmpty == true) {
+      _preferredAreaController.text = widget.initialLocationLabel!.trim();
+    }
+
+    if (widget.initialNotes?.trim().isNotEmpty == true) {
+      _notesController.text = widget.initialNotes!.trim();
+    }
 
     _loadTrainerBookingData();
   }
@@ -244,25 +319,35 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   @override
   void dispose() {
     _preferredAreaController.dispose();
+
     _notesController.dispose();
 
     super.dispose();
   }
 
   // =============================================================================
+
   // BACKEND
+
   // =============================================================================
 
   Future<void> _loadTrainerBookingData() async {
     try {
-      final trainerRow = await _client
-          .from('trainers')
-          .select('''
-            gym_price_per_session,
-            gym_location_label
-            ''')
-          .eq('id', trainer.id)
-          .maybeSingle();
+      final results = await Future.wait<dynamic>([
+        _client
+            .from('trainers')
+            .select('''
+          gym_price_per_session,
+          gym_location_label
+          ''')
+            .eq('id', trainer.id)
+            .maybeSingle(),
+        _client.rpc('get_trainer_booking_availability', params: {'p_trainer_id': trainer.id}),
+      ]);
+
+      final trainerRow = results[0] as Map<String, dynamic>?;
+
+      final availabilityResult = results[1];
 
       final rawGymPrice = trainerRow?['gym_price_per_session'];
 
@@ -272,15 +357,44 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
       final gymLocation = trainerRow?['gym_location_label']?.toString().trim();
 
+      final availabilityStarts = <DateTime>[];
+
+      if (availabilityResult is List) {
+        for (final rawRow in availabilityResult) {
+          if (rawRow is! Map) continue;
+
+          final startsAt = DateTime.tryParse(rawRow['starts_at']?.toString() ?? '');
+
+          if (startsAt == null) continue;
+
+          availabilityStarts.add(_toDubai(startsAt));
+        }
+      }
+
+      availabilityStarts.sort();
+
       if (!mounted) return;
 
       setState(() {
         if (gymPrice != null && gymPrice > 0 && gymLocation != null && gymLocation.isNotEmpty) {
           _gymPrice = gymPrice;
+
           _gymLocationLabel = gymLocation;
         } else {
           _gymPrice = null;
+
           _gymLocationLabel = null;
+        }
+
+        _availabilityStarts = availabilityStarts;
+
+        _availabilityLoadFailed = false;
+
+        final hasReusableLocation =
+            _customerTrainingPlace != null && _preferredAreaController.text.trim().isNotEmpty;
+
+        if (widget.isRepeatBooking && hasReusableLocation) {
+          _currentStep = _hasPrivateGym ? 3 : 2;
         }
 
         _isLoading = false;
@@ -291,18 +405,37 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       if (!mounted) return;
 
       setState(() {
-        // Gym data is optional.
-        // Failure here must not block booking.
         _gymPrice = null;
+
         _gymLocationLabel = null;
+
+        _availabilityStarts = const [];
+
+        _availabilityLoadFailed = true;
 
         _isLoading = false;
       });
     }
   }
 
+  DateTime _toDubai(DateTime value) {
+    return value.toUtc().add(const Duration(hours: 4));
+  }
+
+  String _timeLabel(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+
+    final minute = value.minute.toString().padLeft(2, '0');
+
+    final period = value.hour >= 12 ? 'PM' : 'AM';
+
+    return '$hour:$minute $period';
+  }
+
   // =============================================================================
+
   // NAVIGATION
+
   // =============================================================================
 
   void _goNext() {
@@ -336,7 +469,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // USER CHOICES
+
   // =============================================================================
 
   void _selectCustomerTrainingPlace(CustomerTrainingPlace place) {
@@ -344,8 +479,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       _customerTrainingPlace = place;
 
       // If the user changes their original
+
       // training preference, default the later
+
       // venue decision back to that choice.
+
       _venueChoice = BookingVenueChoice.customerChoice;
     });
   }
@@ -366,7 +504,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
     }
 
     var hour = int.parse(match.group(1)!);
+
     final minute = int.parse(match.group(2)!);
+
     final period = match.group(3)!;
 
     if (period == 'PM' && hour != 12) {
@@ -379,8 +519,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     return DateTime(date.year, date.month, date.day, hour, minute);
   }
+
   // =============================================================================
+
   // PAYMENT
+
   // =============================================================================
 
   void _continueToPayment() {
@@ -395,16 +538,27 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     final checkoutData = BookingCheckoutData(
       trainer: trainer,
+
       customerTrainingPlace: _customerTrainingPlace!,
+
       venueChoice: _venueChoice,
+
       locationLabel: _finalLocationLabel,
+
       sessionRate: _activeSessionRate,
+
       serviceFee: _serviceFee,
+
       total: _total,
+
       scheduledAt: scheduledAt,
+
       paymentMethod: _paymentMethod,
+
       goal: widget.initialGoal,
+
       notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+
       sourceConciergeRequestId: widget.sourceConciergeRequestId,
     );
 
@@ -412,19 +566,24 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // BUILD
+
   // =============================================================================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
+
       body: SafeArea(
         bottom: false,
+
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+
               child: _buildProgressHeader(),
             ),
 
@@ -438,6 +597,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
           ],
         ),
       ),
+
       bottomNavigationBar: _isLoading ? null : _buildBottomActions(),
     );
   }
@@ -459,7 +619,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // PROGRESS HEADER
+
   // =============================================================================
 
   Widget _buildProgressHeader() {
@@ -467,22 +629,33 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       children: [
         Material(
           color: Colors.transparent,
+
           child: InkWell(
             onTap: _currentStep == 1 ? _closeFlow : _goBack,
+
             customBorder: const CircleBorder(),
+
             child: Container(
               width: 46,
+
               height: 46,
+
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
+
                 border: Border.all(color: GSWColors.borderSecondary),
               ),
+
               alignment: Alignment.center,
+
               child: _currentStep == 1
                   ? SvgPicture.asset(
                       GSWIcons.close,
+
                       width: 14,
+
                       height: 14,
+
                       colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
                     )
                   : const Icon(Icons.chevron_left_rounded, size: 30, color: GSWColors.primary),
@@ -495,10 +668,14 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
         Expanded(
           child: ClipRRect(
             borderRadius: BorderRadius.circular(999),
+
             child: LinearProgressIndicator(
               value: _currentStep / _totalSteps,
+
               minHeight: 8,
+
               backgroundColor: GSWColors.surfaceInteractive,
+
               valueColor: const AlwaysStoppedAnimation<Color>(GSWColors.primary),
             ),
           ),
@@ -508,6 +685,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           '$_currentStep of $_totalSteps',
+
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
         ),
       ],
@@ -515,7 +693,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // STEP 1 — CUSTOMER LOCATION PREFERENCE
+
   // =============================================================================
 
   Widget _buildLocationPreferenceStep() {
@@ -523,6 +703,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       children: [
         _buildPageHeading(
           title: 'Confirm where you are training',
+
           subtitle: '${trainer.fullName}, $_trainerService',
         ),
 
@@ -537,7 +718,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
             Expanded(
               child: _buildChoiceChip(
                 label: 'Gym',
+
                 selected: _customerTrainingPlace == CustomerTrainingPlace.gym,
+
                 onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.gym),
               ),
             ),
@@ -547,7 +730,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
             Expanded(
               child: _buildChoiceChip(
                 label: 'Home',
+
                 selected: _customerTrainingPlace == CustomerTrainingPlace.home,
+
                 onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.home),
               ),
             ),
@@ -557,7 +742,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
             Expanded(
               child: _buildChoiceChip(
                 label: 'Outdoors',
+
                 selected: _customerTrainingPlace == CustomerTrainingPlace.outdoors,
+
                 onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.outdoors),
               ),
             ),
@@ -568,6 +755,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           'Preferred area',
+
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -575,13 +763,19 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         GSWTextField(
           size: GSWTextFieldSize.large,
+
           controller: _preferredAreaController,
+
           enabled: _customerTrainingPlace != null,
+
           hintText: _customerTrainingPlace == null ? 'Choose where first' : _areaHint,
+
           textInputAction: TextInputAction.done,
+
           onChanged: (_) {
             setState(() {});
           },
+
           onComplete: (_) {
             if (_stepComplete) {
               _goNext();
@@ -593,6 +787,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           _areaHelpingText,
+
           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.4),
         ),
       ],
@@ -632,7 +827,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // OPTIONAL STEP — TRAINER PRIVATE GYM
+
   // =============================================================================
 
   Widget _buildPrivateGymChoiceStep() {
@@ -640,6 +837,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       children: [
         _buildPageHeading(
           title: 'How would you like to train?',
+
           subtitle: '${trainer.fullName}, $_trainerService',
         ),
 
@@ -648,6 +846,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
           Text(
             'For: ${widget.initialGoal!.trim()}',
+
             style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
           ),
         ],
@@ -656,8 +855,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         _buildVenueCard(
           choice: BookingVenueChoice.trainerPrivateGym,
+
           title: '60 minutes at his gym',
+
           location: _gymLocationLabel!,
+
           price: _gymPrice!,
         ),
 
@@ -665,8 +867,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         _buildVenueCard(
           choice: BookingVenueChoice.customerChoice,
+
           title: '60 minutes $_customerVenueDescription',
+
           location: _customerLocationLabel,
+
           price: _standardPrice,
         ),
 
@@ -674,6 +879,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           'Prices are the session rate. A 5% service fee is added at checkout, and the total is shown before you pay.',
+
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
         ),
       ],
@@ -682,37 +888,52 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
   Widget _buildVenueCard({
     required BookingVenueChoice choice,
+
     required String title,
+
     required String location,
+
     required double price,
   }) {
     final selected = _venueChoice == choice;
 
     return Material(
       color: Colors.transparent,
+
       child: InkWell(
         onTap: () => _selectVenueChoice(choice),
+
         borderRadius: BorderRadius.circular(16),
+
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
+
           width: double.infinity,
+
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
+
             borderRadius: BorderRadius.circular(16),
+
             border: Border.all(
               width: selected ? 2 : 1,
+
               color: selected ? GSWColors.primary : Colors.transparent,
             ),
           ),
+
           child: Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+
                   children: [
                     Text(
                       title,
+
                       style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
                     ),
 
@@ -720,6 +941,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
                     Text(
                       location,
+
                       style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
                     ),
                   ],
@@ -730,6 +952,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
               Text(
                 'AED $price',
+
                 style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.primary),
               ),
             ],
@@ -740,10 +963,16 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // TIME
+
   // =============================================================================
 
   Widget _buildTimeStep() {
+    final selectedDateSlots = _selectedDate == null
+        ? const <String>[]
+        : _timeSlotsForDate(_selectedDate!);
+
     return _stepScroll(
       children: [
         _buildPageHeading(title: 'Pick a time', subtitle: '${trainer.fullName}, $_trainerService'),
@@ -752,6 +981,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           '60 minutes $_finalTrainingDescription, $_finalLocationLabel',
+
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -759,11 +989,16 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         SizedBox(
           height: 60,
+
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+
             physics: const ClampingScrollPhysics(),
+
             itemCount: _availableDates.length,
+
             separatorBuilder: (_, _) => const SizedBox(width: 8),
+
             itemBuilder: (context, index) {
               return _buildDateCard(_availableDates[index]);
             },
@@ -772,28 +1007,43 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         const SizedBox(height: 24),
 
-        if (_selectedDate != null) ...[
+        if (_availabilityLoadFailed) ...[
+          Text(
+            'We could not load ${trainer.fullName}’s availability. Please go back and try again.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          ),
+        ] else if (_availabilityStarts.isEmpty) ...[
+          Text(
+            '${trainer.fullName} has no available times in the next 7 days.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          ),
+        ] else if (_selectedDate != null) ...[
           Text(
             _fullDate(_selectedDate!),
+
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
 
           const SizedBox(height: 24),
 
-          Row(
-            children: [
-              for (int index = 0; index < _timeSlots.length; index++) ...[
-                Expanded(child: _buildTimeCard(_timeSlots[index])),
-
-                if (index != _timeSlots.length - 1) const SizedBox(width: 8),
+          if (selectedDateSlots.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final time in selectedDateSlots)
+                  SizedBox(
+                    width: (MediaQuery.sizeOf(context).width - 48) / 3,
+                    child: _buildTimeCard(time),
+                  ),
               ],
-            ],
-          ),
+            ),
 
           const SizedBox(height: 24),
 
           Text(
-            'Times shown allow trainer travel time between clients. The slot is held for 10 minutes once you continue.',
+            'Times shown are based on ${trainer.fullName}’s current availability.',
+
             style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.45),
           ),
         ],
@@ -812,46 +1062,66 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildDateCard(DateTime date) {
     final selected = _selectedDate != null && _sameDate(_selectedDate!, date);
 
+    final available = _dateHasAvailability(date);
+
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedDate = date;
 
-            _selectedTime = null;
-          });
-        },
+      child: InkWell(
+        onTap: available
+            ? () {
+                setState(() {
+                  _selectedDate = date;
+
+                  _selectedTime = null;
+                });
+              }
+            : null,
+
         borderRadius: BorderRadius.circular(12),
+
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
+
           width: 46,
+
           padding: const EdgeInsets.symmetric(vertical: 8),
+
           decoration: BoxDecoration(
             color: selected ? GSWColors.primary : GSWColors.backgroundPrimary,
+
             borderRadius: BorderRadius.circular(12),
+
             border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _shortWeekday(date),
-                style: GSWTextStyles.bodyExtraSmall.copyWith(
-                  color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
-                ),
-              ),
 
-              const SizedBox(height: 4),
+          child: Opacity(
+            opacity: available ? 1 : 0.38,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
 
-              Text(
-                '${date.day}',
-                style: GSWTextStyles.bodyLarge.copyWith(
-                  color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
-                  fontWeight: FontWeight.w600,
+              children: [
+                Text(
+                  _shortWeekday(date),
+
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(
+                    color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
+                  ),
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 4),
+
+                Text(
+                  '${date.day}',
+
+                  style: GSWTextStyles.bodyLarge.copyWith(
+                    color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -863,28 +1133,39 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     return Material(
       color: Colors.transparent,
+
       child: InkWell(
         onTap: () {
           setState(() {
             _selectedTime = time;
           });
         },
+
         borderRadius: BorderRadius.circular(12),
+
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
+
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+
           decoration: BoxDecoration(
             color: selected ? GSWColors.primary : GSWColors.surfacePrimary,
+
             borderRadius: BorderRadius.circular(12),
+
             border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
           ),
+
           child: Column(
             children: [
               Text(
                 time,
+
                 textAlign: TextAlign.center,
+
                 style: GSWTextStyles.titleExtraSmall.copyWith(
                   color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -893,6 +1174,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
               Text(
                 '60 min',
+
                 style: GSWTextStyles.bodyExtraSmall.copyWith(
                   color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
                 ),
@@ -905,7 +1187,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // REVIEW
+
   // =============================================================================
 
   Widget _buildReviewStep() {
@@ -921,11 +1205,17 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         GSWTextArea(
           size: GSWTextAreaSize.large,
+
           controller: _notesController,
+
           label: 'Anything $_trainerFirstName should know?',
+
           hintText: 'Anything $_trainerFirstName should know before the session...',
+
           helpingText: 'Please don’t include health details here.',
+
           maxLength: 250,
+
           onChanged: (_) {
             setState(() {});
           },
@@ -935,6 +1225,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           '$_trainerFirstName receives your name and mobile number so they can reach you on the day.',
+
           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -946,6 +1237,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
         Text(
           'Cancellation',
+
           style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -958,6 +1250,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
           'The 5% service fee is not refunded when you cancel. '
           'You can move the booking once. '
           'If $_trainerFirstName cancels or doesn’t turn up, you choose a full refund, a new time, or another trainer.',
+
           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
         ),
 
@@ -989,37 +1282,50 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildBookingSummaryCard() {
     return Container(
       width: double.infinity,
+
       padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
+
         borderRadius: BorderRadius.circular(16),
       ),
+
       child: Column(
         children: [
           Row(
             children: [
               Container(
                 width: 48,
+
                 height: 48,
+
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
+
                   color: GSWColors.surfaceInteractive,
+
                   image: trainer.profileImageUrl?.isNotEmpty == true
                       ? DecorationImage(
                           image: NetworkImage(trainer.profileImageUrl!),
+
                           fit: BoxFit.cover,
                         )
                       : null,
                 ),
-                alignment: Alignment.center,
+
+                alignment: const Alignment(0, -1),
+
                 child: trainer.profileImageUrl?.isNotEmpty == true
                     ? null
                     : Text(
                         trainer.fullName.trim().isEmpty
                             ? ''
                             : trainer.fullName.trim()[0].toUpperCase(),
+
                         style: GSWTextStyles.bodyLarge.copyWith(
                           color: GSWColors.textPrimary,
+
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1030,17 +1336,21 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+
                   children: [
                     Text(
                       trainer.fullName,
+
                       style: GSWTextStyles.bodyLarge.copyWith(
                         color: GSWColors.textPrimary,
+
                         fontWeight: FontWeight.w600,
                       ),
                     ),
 
                     Text(
                       _trainerService,
+
                       style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                     ),
                   ],
@@ -1053,10 +1363,13 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
                     _currentStep = 1;
                   });
                 },
+
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
+
                   child: Text(
                     'Edit',
+
                     style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
                   ),
                 ),
@@ -1072,6 +1385,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
           _buildSummaryRow(
             label: 'When',
+
             value: _selectedDate == null || _selectedTime == null
                 ? ''
                 : '${_fullDate(_selectedDate!)}, $_selectedTime',
@@ -1085,6 +1399,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
           _buildSummaryRow(
             label: 'Training',
+
             value: _venueChoice == BookingVenueChoice.trainerPrivateGym
                 ? 'Trainer gym'
                 : '$_customerTrainingPlaceLabel · $_customerLocationLabel',
@@ -1103,11 +1418,14 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildSummaryRow({required String label, required String value}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
+
       children: [
         SizedBox(
           width: 70,
+
           child: Text(
             label,
+
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
         ),
@@ -1115,7 +1433,9 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
         Expanded(
           child: Text(
             value,
+
             textAlign: TextAlign.right,
+
             style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
           ),
         ),
@@ -1126,11 +1446,15 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildPriceBreakdown() {
     return Container(
       width: double.infinity,
+
       padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
+
         borderRadius: BorderRadius.circular(16),
       ),
+
       child: Column(
         children: [
           _buildPriceRow(label: 'Session, 60 minutes', amount: _activeSessionRate),
@@ -1150,12 +1474,14 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
               Expanded(
                 child: Text(
                   'Total',
+
                   style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary),
                 ),
               ),
 
               Text(
                 'AED $_total',
+
                 style: GSWTextStyles.headingSmall.copyWith(color: GSWColors.primary),
               ),
             ],
@@ -1171,12 +1497,14 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
         Expanded(
           child: Text(
             label,
+
             style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
           ),
         ),
 
         Text(
           'AED $amount',
+
           style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
         ),
       ],
@@ -1188,23 +1516,32 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     return Material(
       color: Colors.transparent,
+
       child: InkWell(
         onTap: () {
           setState(() {
             _paymentMethod = method;
           });
         },
+
         borderRadius: BorderRadius.circular(10),
+
         child: Container(
           height: 50,
+
           alignment: Alignment.center,
+
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
+
             borderRadius: BorderRadius.circular(10),
+
             border: Border.all(color: selected ? GSWColors.primary : GSWColors.surfaceInteractive),
           ),
+
           child: Text(
             label,
+
             style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
           ),
         ),
@@ -1213,24 +1550,33 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // BOTTOM ACTIONS
+
   // =============================================================================
 
   Widget _buildBottomActions() {
     return Container(
       color: GSWColors.surfacePrimary,
+
       child: SafeArea(
         top: false,
+
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+
           child: _isReviewStep
               ? Column(
                   mainAxisSize: MainAxisSize.min,
+
                   children: [
                     GSWButton(
                       label: 'Continue to payment',
+
                       onPressed: _continueToPayment,
+
                       variant: GSWButtonVariant.primary,
+
                       size: GSWButtonSize.large,
                     ),
 
@@ -1238,18 +1584,24 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
                     Text(
                       'Payments are processed securely by our payment provider. Your card details never reach GetSetWell.',
+
                       textAlign: TextAlign.center,
+
                       style: GSWTextStyles.bodyExtraSmall.copyWith(color: GSWColors.textTertiary),
                     ),
                   ],
                 )
               : Column(
                   mainAxisSize: MainAxisSize.min,
+
                   children: [
                     GSWButton(
                       label: _currentStep == 1 ? 'Back to $_trainerFirstName' : 'Back',
+
                       onPressed: _currentStep == 1 ? _closeFlow : _goBack,
+
                       variant: GSWButtonVariant.secondary,
+
                       size: GSWButtonSize.large,
                     ),
 
@@ -1257,8 +1609,11 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
                     GSWButton(
                       label: 'Continue',
+
                       onPressed: _stepComplete ? _goNext : null,
+
                       variant: _stepComplete ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+
                       size: GSWButtonSize.large,
                     ),
                   ],
@@ -1269,30 +1624,44 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   // =============================================================================
+
   // SHARED UI
+
   // =============================================================================
 
   Widget _buildChoiceChip({
     required String label,
+
     required bool selected,
+
     required VoidCallback onTap,
   }) {
     return Material(
       color: Colors.transparent,
+
       child: InkWell(
         onTap: onTap,
+
         borderRadius: BorderRadius.circular(999),
+
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
+
           height: 40,
+
           alignment: Alignment.center,
+
           decoration: BoxDecoration(
             color: selected ? GSWColors.primary : GSWColors.surfacePrimary,
+
             borderRadius: BorderRadius.circular(999),
+
             border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
           ),
+
           child: Text(
             label,
+
             style: GSWTextStyles.labelLarge.copyWith(
               color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
             ),
@@ -1305,9 +1674,12 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _stepScroll({required List<Widget> children}) {
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+
       child: SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
+
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
       ),
     );
@@ -1316,6 +1688,7 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildPageHeading({required String title, String? subtitle}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+
       children: [
         Text(title, style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary)),
 
@@ -1343,16 +1716,27 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
     const months = [
       'January',
+
       'February',
+
       'March',
+
       'April',
+
       'May',
+
       'June',
+
       'July',
+
       'August',
+
       'September',
+
       'October',
+
       'November',
+
       'December',
     ];
 

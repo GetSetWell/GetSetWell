@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
@@ -68,15 +69,11 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<bool> _savePreference(String column, bool value) async {
     final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
-
-    if (user == null) {
-      return false;
-    }
+    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
     try {
       await client.from('notification_preferences').upsert({
-        'user_id': user.id,
+        'user_id': customerId,
         column: value,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id');
@@ -111,23 +108,13 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _loadPreferences() async {
     final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-
-      return;
-    }
+    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
     try {
       final preferences = await client
           .from('notification_preferences')
           .select('trainer_matches, booking_updates, session_reminders, new_trainers')
-          .eq('user_id', user.id)
+          .eq('user_id', customerId)
           .maybeSingle();
 
       if (!mounted) return;

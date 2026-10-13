@@ -164,10 +164,12 @@ class BookingConfirmationScreen extends StatelessWidget {
       'December',
     ];
 
-    return '${weekdays[start.weekday - 2]} '
-        '${start.day - 1} '
-        '${months[start.month - 1]}, '
-        '${_time(start)}';
+    final cancellationCutoff = start.subtract(const Duration(hours: 24));
+
+    return '${weekdays[cancellationCutoff.weekday - 1]} '
+        '${cancellationCutoff.day} '
+        '${months[cancellationCutoff.month - 1]}, '
+        '${_time(cancellationCutoff)}';
   }
 
   String _sessionDateRange(DateTime start) {

@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/booking/domain/models/active_concierge_match.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,16 +19,15 @@ class ActiveConciergeMatchService {
   };
 
   Future<ActiveConciergeMatch?> getCurrent() async {
-    final user = _client.auth.currentUser;
-
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return null;
     }
-
+    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
     final rows = await _client
         .from('booking_requests')
         .select('id, reference_code, status, goal, trainer_id, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', customerId)
         .eq('request_type', 'concierge_match')
         .order('created_at', ascending: false)
         .limit(10);

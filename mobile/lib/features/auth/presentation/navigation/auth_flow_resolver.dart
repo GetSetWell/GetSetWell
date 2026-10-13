@@ -1,15 +1,14 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
 import 'package:mobile/features/booking/data/services/booking_request_service.dart';
 import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthFlowType;
 
-Future<void> resolveAuthFlow(
-  BuildContext context,
-  AuthFlowIntent intent,
-) async {
+Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async {
   final client = Supabase.instance.client;
 
   // ---------------------------------------------------------------------------
@@ -28,11 +27,7 @@ Future<void> resolveAuthFlow(
 
     if (payload == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'We could not find your matching request. Please try again.',
-          ),
-        ),
+        const SnackBar(content: Text('We could not find your matching request. Please try again.')),
       );
       return;
     }
@@ -40,7 +35,7 @@ Future<void> resolveAuthFlow(
     // A concierge request must belong to an authenticated customer.
     // If the session disappeared, return to the existing auth flow and
     // preserve the pending concierge payload.
-    final user = client.auth.currentUser;
+    final user = FirebaseAuth.instance.currentUser;
 
     if (user == null) {
       if (!context.mounted) return;
@@ -60,10 +55,12 @@ Future<void> resolveAuthFlow(
     // If name/city are missing, send the user to the existing "Almost There"
     // screen instead of allowing the Edge Function to return HTTP 409.
     try {
+      final customerId = await CustomerIdentityService(client: client).getCustomerId();
+
       final profile = await client
           .from('customer_profiles')
           .select('full_name, city')
-          .eq('id', user.id)
+          .eq('id', customerId)
           .maybeSingle();
 
       final fullName = profile?['full_name']?.toString().trim() ?? '';
@@ -78,16 +75,12 @@ Future<void> resolveAuthFlow(
         return;
       }
     } catch (error) {
-      debugPrint(
-        'Failed to check customer profile before concierge request: $error',
-      );
+      debugPrint('Failed to check customer profile before concierge request: $error');
 
       if (!context.mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('We could not check your profile. Please try again.'),
-        ),
+        const SnackBar(content: Text('We could not check your profile. Please try again.')),
       );
       return;
     }
@@ -111,9 +104,7 @@ Future<void> resolveAuthFlow(
           time: _formatLabel(payload.preferredTime),
           trainingLocation: payload.trainingLocationName,
           preferredArea: payload.preferredArea,
-          trainerPreference: payload.trainerGenderPreference == 'female'
-              ? 'Female'
-              : null,
+          trainerPreference: payload.trainerGenderPreference == 'female' ? 'Female' : null,
           budget: _formatBudget(payload.budgetMin, payload.budgetMax),
           language: payload.languagePreference,
         ),
@@ -134,18 +125,14 @@ Future<void> resolveAuthFlow(
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('We could not send your request. Please try again.'),
-        ),
+        const SnackBar(content: Text('We could not send your request. Please try again.')),
       );
     } on BookingRequestException catch (error) {
       if (!context.mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
       debugPrint('Failed to resolve concierge request: $error');
 
@@ -154,9 +141,7 @@ Future<void> resolveAuthFlow(
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('We could not send your request. Please try again.'),
-        ),
+        const SnackBar(content: Text('We could not send your request. Please try again.')),
       );
     }
   }

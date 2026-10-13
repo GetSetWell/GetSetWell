@@ -26,6 +26,20 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
   bool _isDeleting = false;
 
+  void _showDeletionError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _retryUpcomingSessions() {
+    if (!mounted) return;
+    setState(() {
+      _upcomingSessionsFuture = _sessionsService.getUpcomingSessions();
+    });
+  }
+
   bool get _canDelete => _deleteController.text.trim().toUpperCase() == 'DELETE';
 
   @override
@@ -60,8 +74,19 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       context.go(GSWRoutes.onboarding);
     } on AccountDeletionException catch (error) {
       debugPrint('Delete account failed: ${error.message}');
+      final requiresRecentLogin = error.message.toLowerCase().contains('sign in again');
+      _showDeletionError(
+        requiresRecentLogin
+            ? 'Please sign in again before deleting your account.'
+            : 'We could not confirm account deletion. Contact info@getsetwell.com before trying again.',
+      );
+      _retryUpcomingSessions();
     } catch (error) {
       debugPrint('Delete account failed: $error');
+      _showDeletionError(
+        'We could not confirm account deletion. Please contact info@getsetwell.com before trying again.',
+      );
+      _retryUpcomingSessions();
     } finally {
       if (mounted) {
         setState(() {
@@ -80,7 +105,11 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           future: _upcomingSessionsFuture,
           builder: (context, snapshot) {
             final sessions = snapshot.data ?? [];
-            final hasUpcomingSession = sessions.isNotEmpty;
+            final isCheckingSessions = snapshot.connectionState != ConnectionState.done;
+            final sessionCheckFailed = snapshot.hasError;
+            final hasUpcomingSession =
+                !isCheckingSessions && !sessionCheckFailed && sessions.isNotEmpty;
+            final cannotConfirmNoUpcomingSessions = isCheckingSessions || sessionCheckFailed;
 
             return Column(
               children: [
@@ -106,8 +135,31 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
                           const SizedBox(height: 24),
 
-                          if (hasUpcomingSession)
-                            _buildUpcomingSessionState(sessions.first)
+                          if (isCheckingSessions)
+                            Text(
+                              'Checking your upcoming sessions…',
+                              style: GSWTextStyles.bodyMedium.copyWith(
+                                color: GSWColors.textSecondary,
+                              ),
+                            )
+                          else if (sessionCheckFailed)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'We could not check your upcoming sessions. Please try again.',
+                                  style: GSWTextStyles.bodyMedium.copyWith(
+                                    color: GSWColors.textSecondary,
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: _retryUpcomingSessions,
+                                  child: const Text('Try again'),
+                                ),
+                              ],
+                            )
+                          else if (hasUpcomingSession)
+                            _buildUpcomingSessionState(sessions)
                           else
                             _buildNormalDeleteState(),
                         ],
@@ -116,7 +168,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                   ),
                 ),
 
-                _buildBottomActions(hasUpcomingSession: hasUpcomingSession),
+                _buildBottomActions(
+                  hasUpcomingSession: hasUpcomingSession,
+                  sessionCheckUnavailable: cannotConfirmNoUpcomingSessions,
+                ),
               ],
             );
           },
@@ -125,12 +180,12 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     );
   }
 
-  Widget _buildUpcomingSessionState(Map<String, dynamic> session) {
+  Widget _buildUpcomingSessionState(List<Map<String, dynamic>> sessions) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'You can delete your account once you have no upcoming sessions. We then delete your account and personal details within 30 days.',
+          'You can request account deletion once you have no upcoming confirmed or booked sessions.',
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -148,14 +203,14 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'You have 1 upcoming session',
+                'You have ${sessions.length} upcoming ${sessions.length == 1 ? 'session' : 'sessions'}',
                 style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
               ),
 
               const SizedBox(height: 12),
 
               Text(
-                "Cancel it before you delete your account. It's more than 24 hours away, so you'd get the AED 250 session fee back.",
+                'Please review your upcoming bookings before deleting your account. Cancellation and refund eligibility depend on your booking and the applicable policy.',
                 style: GSWTextStyles.bodyLarge.copyWith(
                   color: GSWColors.textSecondary,
                   height: 1.5,
@@ -180,7 +235,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "This can't be undone. To use GetSetWell again, you'd sign up as a new customer.",
+          "Deleting your sign-in account can't be undone. If you return to GetSetWell, you'll need to sign up again.",
           style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
         ),
 
@@ -253,17 +308,19 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
           const SizedBox(height: 12),
 
-          _buildBullet('Your account, name and mobile number are deleted within 30 days.'),
-
-          const SizedBox(height: 12),
-
           _buildBullet(
-            'Booking, payment and refund records are kept for 7 years, as UAE tax law requires.',
+            'Your sign-in account is removed when the request succeeds. Other personal data is not yet automatically erased.',
           ),
 
           const SizedBox(height: 12),
 
-          _buildBullet("You're logged out straight away on this phone."),
+          _buildBullet(
+            'Some booking, payment and refund records may need to be retained for legal or operational reasons.',
+          ),
+
+          const SizedBox(height: 12),
+
+          _buildBullet('You are signed out on this device when the sign-in account is removed.'),
         ],
       ),
     );
@@ -294,14 +351,24 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     );
   }
 
-  Widget _buildBottomActions({required bool hasUpcomingSession}) {
+  Widget _buildBottomActions({
+    required bool hasUpcomingSession,
+    required bool sessionCheckUnavailable,
+  }) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      child: hasUpcomingSession
+      child: sessionCheckUnavailable
+          ? GSWButton(
+              label: 'Delete my account',
+              onPressed: null,
+              variant: GSWButtonVariant.disabled,
+              size: GSWButtonSize.large,
+            )
+          : hasUpcomingSession
           ? GSWButton(
               label: 'Go to my booking',
               onPressed: () {
-                context.go(GSWRoutes.sessions);
+                context.go(GSWRoutes.sessions, extra: 1);
               },
               variant: GSWButtonVariant.primary,
               size: GSWButtonSize.large,

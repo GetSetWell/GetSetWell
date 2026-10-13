@@ -37,36 +37,37 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
         .from('booking_requests')
         .select('''
 
-          id,
+      id,
 
-          trainer_id,
-          status,
+      status,
 
-          goal,
+      trainer_id,
 
-          preferred_days,
+      goal,
 
-          preferred_time,
+      preferred_days,
 
-          preferred_area,
+      preferred_time,
 
-          budget_min,
+      preferred_area,
 
-          budget_max,
+      budget_min,
 
-          match_outcome,
+      budget_max,
 
-          match_reason,
+      match_outcome,
 
-          matched_at,
+      match_reason,
 
-          training_locations (
+      matched_at,
 
-            name
+      training_locations (
 
-          )
+        name
 
-        ''')
+      )
+
+    ''')
         .eq('id', widget.requestId)
         .single();
 
@@ -74,17 +75,21 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
     final status = request['status']?.toString().trim().toLowerCase() ?? '';
 
-    if (status != 'matched') {
+    final trainerId = request['trainer_id']?.toString().trim() ?? '';
+
+    final canShowMatchedTrainer =
+        status == 'matched' ||
+        ((status == 'cancelled' || status == 'canceled') && trainerId.isNotEmpty);
+
+    if (!canShowMatchedTrainer) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
 
         context.go(GSWRoutes.conciergeRequestStatus, extra: widget.requestId);
       });
 
-      throw Exception('Request is no longer matched.');
+      throw Exception('Request does not have a viewable trainer match.');
     }
-
-    final trainerId = request['trainer_id']?.toString().trim() ?? '';
 
     if (trainerId.isEmpty) {
       throw Exception('Matched request has no trainer.');
@@ -142,6 +147,10 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
     final trainer = data.trainer;
 
     final fullName = trainer.fullName;
+
+    final status = request['status']?.toString().trim().toLowerCase() ?? '';
+
+    final isReadOnly = status == 'cancelled' || status == 'canceled';
 
     final firstName = fullName.split(RegExp(r'\s+')).first;
 
@@ -351,7 +360,7 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
                           ),
                         ),
 
-                        if (isOutsideBudget) ...[
+                        if (!isReadOnly && isOutsideBudget) ...[
                           const SizedBox(height: 24),
 
                           Center(
@@ -382,6 +391,18 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
                             style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                           ),
                         ],
+
+                        if (isReadOnly) ...[
+                          const SizedBox(height: 10),
+
+                          Text(
+                            'This request was cancelled. You can still review the trainer we matched you with.',
+                            style: GSWTextStyles.bodySmall.copyWith(
+                              color: GSWColors.textSecondary,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -391,15 +412,16 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
           ),
         ),
 
-        _buildBottomActions(
-          firstName: firstName,
+        if (!isReadOnly)
+          _buildBottomActions(
+            firstName: firstName,
 
-          objectPronoun: objectPronoun,
+            objectPronoun: objectPronoun,
 
-          isOutsideBudget: isOutsideBudget,
+            isOutsideBudget: isOutsideBudget,
 
-          trainer: trainer,
-        ),
+            trainer: trainer,
+          ),
       ],
     );
   }
@@ -964,32 +986,46 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
     final submitted = await showModalBottomSheet<bool>(
       context: context,
+
       isScrollControlled: true,
+
       backgroundColor: Colors.transparent,
+
       barrierColor: Colors.black,
+
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             return Padding(
               padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+
               child: Container(
                 decoration: const BoxDecoration(
                   color: GSWColors.backgroundPrimary,
+
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
+
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+
                 child: SafeArea(
                   top: false,
+
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+
                     crossAxisAlignment: CrossAxisAlignment.start,
+
                     children: [
                       Center(
                         child: Container(
                           width: 40,
+
                           height: 4,
+
                           decoration: BoxDecoration(
                             color: GSWColors.borderSecondary,
+
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
@@ -999,8 +1035,10 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       Text(
                         'What\'s not right?',
+
                         style: GSWTextStyles.titleLarge.copyWith(
                           color: GSWColors.textPrimary,
+
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -1009,8 +1047,10 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       Text(
                         'Tell us and we\'ll keep looking. There\'s no obligation to book.',
+
                         style: GSWTextStyles.bodySmall.copyWith(
                           color: GSWColors.textSecondary,
+
                           height: 1.45,
                         ),
                       ),
@@ -1020,14 +1060,19 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
                       Container(
                         decoration: BoxDecoration(
                           color: GSWColors.surfacePrimary,
+
                           borderRadius: BorderRadius.circular(14),
                         ),
+
                         child: Column(
                           children: [
                             _buildReasonOption(
                               label: 'The price',
+
                               value: 'price',
+
                               selectedValue: selectedReason,
+
                               onTap: () {
                                 setSheetState(() {
                                   selectedReason = 'price';
@@ -1039,8 +1084,11 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                             _buildReasonOption(
                               label: 'The days or times',
+
                               value: 'days_times',
+
                               selectedValue: selectedReason,
+
                               onTap: () {
                                 setSheetState(() {
                                   selectedReason = 'days_times';
@@ -1052,8 +1100,11 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                             _buildReasonOption(
                               label: 'The area or place',
+
                               value: 'area',
+
                               selectedValue: selectedReason,
+
                               onTap: () {
                                 setSheetState(() {
                                   selectedReason = 'area';
@@ -1065,8 +1116,11 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                             _buildReasonOption(
                               label: 'I\'d like a different trainer',
+
                               value: 'trainer',
+
                               selectedValue: selectedReason,
+
                               onTap: () {
                                 setSheetState(() {
                                   selectedReason = 'trainer';
@@ -1078,8 +1132,11 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                             _buildReasonOption(
                               label: 'Something else',
+
                               value: 'other',
+
                               selectedValue: selectedReason,
+
                               onTap: () {
                                 setSheetState(() {
                                   selectedReason = 'other';
@@ -1094,6 +1151,7 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       Text(
                         'Anything to add? (optional)',
+
                         style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                       ),
 
@@ -1101,22 +1159,33 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       TextField(
                         controller: noteController,
+
                         maxLines: 2,
+
                         style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+
                         decoration: InputDecoration(
                           hintText: 'For example, evenings would suit me better',
+
                           hintStyle: GSWTextStyles.bodyMedium.copyWith(
                             color: GSWColors.textSecondary,
                           ),
+
                           filled: true,
+
                           fillColor: GSWColors.surfacePrimary,
+
                           contentPadding: const EdgeInsets.all(14),
+
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
+
                             borderSide: const BorderSide(color: GSWColors.borderSecondary),
                           ),
+
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
+
                             borderSide: const BorderSide(color: GSWColors.primary),
                           ),
                         ),
@@ -1126,6 +1195,7 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       Text(
                         'Please don\'t include health details.',
+
                         style: GSWTextStyles.bodyExtraSmall.copyWith(
                           color: GSWColors.textSecondary,
                         ),
@@ -1135,19 +1205,26 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
 
                       SizedBox(
                         width: double.infinity,
+
                         child: GSWButton(
                           size: GSWButtonSize.large,
+
                           variant: GSWButtonVariant.primary,
+
                           label: 'Send and keep looking',
+
                           onPressed: () async {
                             try {
                               FocusManager.instance.primaryFocus?.unfocus();
 
                               await Supabase.instance.client.rpc(
                                 'request_concierge_rematch',
+
                                 params: {
                                   'p_request_id': widget.requestId,
+
                                   'p_reason': selectedReason,
+
                                   'p_note': noteController.text.trim().isEmpty
                                       ? null
                                       : noteController.text.trim(),
@@ -1157,6 +1234,7 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
                               if (!sheetContext.mounted) return;
 
                               // Only close the bottom sheet here.
+
                               Navigator.of(sheetContext).pop(true);
                             } catch (error) {
                               debugPrint('Request concierge rematch failed: $error');
@@ -1182,10 +1260,13 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
                           onPressed: () {
                             Navigator.of(sheetContext).pop(false);
                           },
+
                           child: Text(
                             'Keep $firstName as my match',
+
                             style: GSWTextStyles.bodyMedium.copyWith(
                               color: GSWColors.primary,
+
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1208,6 +1289,7 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
     }
 
     // Return the successful rematch result to YourMatchScreen.
+
     context.pop(true);
   }
 
@@ -1379,7 +1461,6 @@ class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
       'morning' => 'mornings',
       'afternoon' => 'afternoons',
       'evening' => 'evenings',
-
       _ => normalizedTime,
     };
 
