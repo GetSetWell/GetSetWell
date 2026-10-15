@@ -176,7 +176,8 @@ class TrainerRepository {
           description,
           check_type,
           display_order,
-          is_verified
+          is_verified,
+          verified_at
         ),
         trainer_specialties (
           specialties (

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
 
+/// 12.7 Language (Figma 1077:3629).
 class LanguageScreen extends StatelessWidget {
   const LanguageScreen({super.key});
 
@@ -16,7 +20,7 @@ class LanguageScreen extends StatelessWidget {
           behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
           child: SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -26,14 +30,20 @@ class LanguageScreen extends StatelessWidget {
 
                 Text(
                   'Language',
-                  style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+                  style: GSWTextStyles.titleLarge.copyWith(
+                    height: 30 / 24,
+                    color: GSWColors.textPrimary,
+                  ),
                 ),
 
                 const SizedBox(height: 6),
 
                 Text(
                   'Choose the language for the app.',
-                  style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    height: 20 / 14,
+                    color: GSWColors.textSecondary,
+                  ),
                 ),
 
                 const SizedBox(height: 24),
@@ -44,7 +54,10 @@ class LanguageScreen extends StatelessWidget {
 
                 Text(
                   'Arabic is coming soon, with the app laid out right to left. Until then, GetSetWell is in English.',
-                  style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.bodySmall.copyWith(
+                    height: 16 / 12,
+                    color: GSWColors.textTertiary,
+                  ),
                 ),
               ],
             ),
@@ -65,14 +78,19 @@ class LanguageScreen extends StatelessWidget {
         },
         customBorder: const CircleBorder(),
         child: Container(
-          width: 48,
-          height: 48,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: GSWColors.borderSecondary),
           ),
           alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
+          child: SvgPicture.asset(
+            GSWIcons.arrowheadLeft,
+            width: 30,
+            height: 30,
+            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          ),
         ),
       ),
     );
@@ -81,18 +99,16 @@ class LanguageScreen extends StatelessWidget {
   Widget _buildLanguageCard() {
     return Container(
       width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         children: [
           _buildEnglishRow(),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(height: 1, color: GSWColors.borderSecondary),
-          ),
+          const Divider(height: 1, thickness: 1, color: GSWColors.surfaceInteractive),
 
           _buildArabicRow(),
         ],
@@ -101,50 +117,61 @@ class LanguageScreen extends StatelessWidget {
   }
 
   Widget _buildEnglishRow() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'English',
-              style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+    return Semantics(
+      selected: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'English',
+                style: GSWTextStyles.bodyLarge.copyWith(height: 1, color: GSWColors.textPrimary),
+              ),
             ),
-          ),
 
-          _buildSelectedIndicator(),
-        ],
+            const SizedBox(width: 14),
+
+            _buildSelectedIndicator(),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildArabicRow() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
-            child: Opacity(
-              opacity: 0.5,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'العربية',
-                    style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'العربية',
+                  textDirection: TextDirection.rtl,
+                  style: GSWTextStyles.bodyLarge.copyWith(
+                    height: 1,
+                    color: GSWColors.textTertiary,
                   ),
+                ),
 
-                  const SizedBox(height: 2),
+                const SizedBox(height: 2),
 
-                  Text(
-                    'Arabic',
-                    style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                Text(
+                  'Arabic',
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    height: 20 / 14,
+                    color: GSWColors.textTertiary,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(width: 14),
 
           _buildComingSoonPill(),
         ],
@@ -174,11 +201,11 @@ class LanguageScreen extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: GSWColors.surfaceInteractive,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
       ),
       child: Text(
         'Coming soon',
-        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+        style: GSWTextStyles.bodySmall.copyWith(height: 16 / 12, color: GSWColors.textSecondary),
       ),
     );
   }

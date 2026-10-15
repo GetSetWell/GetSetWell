@@ -11,6 +11,9 @@ class GSWColors {
   static const Color backgroundSecondary = Color(0xFF0D1926);
   static const Color backgroundOverlay = Color(0x66000D1B);
 
+  // Bottom-sheet scrim: #00050D at 72% (sheet spec, Figma 11.1/11.2).
+  static const Color scrim = Color(0xB800050D);
+
   // Background States
   static const Color backgroundSuccess = Color(0xFF082012);
   static const Color backgroundWarning = Color(0xFF261D05);

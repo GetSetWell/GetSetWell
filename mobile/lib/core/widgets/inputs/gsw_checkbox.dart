@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 
@@ -111,7 +112,7 @@ class _GSWCheckboxState extends State<GSWCheckbox> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: _backgroundColor,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(GSWRadius.checkbox),
                   border: Border.all(color: _borderColor, width: _borderWidth),
                   boxShadow: _focusShadow,
                 ),
@@ -191,7 +192,8 @@ class _GSWCheckboxState extends State<GSWCheckbox> {
       return GSWColors.primary;
     }
 
-    return GSWColors.borderSecondary;
+    // Figma: unchecked box border is Icon/Secondary #82888F.
+    return GSWColors.iconSecondary;
   }
 
   double get _borderWidth {

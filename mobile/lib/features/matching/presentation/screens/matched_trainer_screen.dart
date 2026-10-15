@@ -1,16 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
+import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
+import 'package:mobile/features/matching/presentation/screens/nobody_fits_screen.dart';
+import 'package:mobile/features/matching/presentation/widgets/concierge_request_detail_view.dart';
+import 'package:mobile/features/matching/presentation/widgets/concierge_ui.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_verification_row.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_verification_sheet.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Figma 4.2 "Your match, within budget" (816:6109, note 816:6174) and
+/// 4.3 "Your match, above budget" (816:6176, note 816:6241).
+///
+/// Opened from the request detail (Continue) and from the "We picked your
+/// trainer" push. If the request is not showing a match (still matching,
+/// nobody fits, booked without a trainer) it renders the matching screen for
+/// that state instead of bouncing the navigation stack.
 class MatchedTrainerScreen extends StatefulWidget {
   const MatchedTrainerScreen({super.key, required this.requestId});
 
@@ -20,1533 +33,1002 @@ class MatchedTrainerScreen extends StatefulWidget {
   State<MatchedTrainerScreen> createState() => _MatchedTrainerScreenState();
 }
 
+enum _View { match, noFit, detail }
+
 class _MatchedTrainerScreenState extends State<MatchedTrainerScreen> {
-  late final Future<_MatchedTrainerData> _dataFuture;
+  late Future<_MatchData> _future;
+
+  bool _isFindingWithinBudget = false;
 
   @override
   void initState() {
     super.initState();
-
-    _dataFuture = _loadData();
+    _future = _load();
   }
 
-  Future<_MatchedTrainerData> _loadData() async {
+  Future<_MatchData> _load() async {
     final client = Supabase.instance.client;
+    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
-    final requestRow = await client
+    final row = await client
         .from('booking_requests')
         .select('''
-
-      id,
-
-      status,
-
-      trainer_id,
-
-      goal,
-
-      preferred_days,
-
-      preferred_time,
-
-      preferred_area,
-
-      budget_min,
-
-      budget_max,
-
-      match_outcome,
-
-      match_reason,
-
-      matched_at,
-
-      training_locations (
-
-        name
-
-      )
-
-    ''')
+          id,
+          status,
+          trainer_id,
+          goal,
+          preferred_days,
+          preferred_time,
+          preferred_area,
+          budget_min,
+          budget_max,
+          match_outcome,
+          match_reason,
+          matched_at,
+          training_locations (
+            name
+          )
+        ''')
         .eq('id', widget.requestId)
-        .single();
+        .eq('user_id', customerId)
+        .eq('request_type', 'concierge_match')
+        .maybeSingle();
 
-    final request = Map<String, dynamic>.from(requestRow);
-
-    final status = request['status']?.toString().trim().toLowerCase() ?? '';
-
-    final trainerId = request['trainer_id']?.toString().trim() ?? '';
-
-    final canShowMatchedTrainer =
-        status == 'matched' ||
-        ((status == 'cancelled' || status == 'canceled') && trainerId.isNotEmpty);
-
-    if (!canShowMatchedTrainer) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-
-        context.go(GSWRoutes.conciergeRequestStatus, extra: widget.requestId);
-      });
-
-      throw Exception('Request does not have a viewable trainer match.');
+    if (row == null) {
+      throw Exception('Request not found.');
     }
 
-    if (trainerId.isEmpty) {
-      throw Exception('Matched request has no trainer.');
+    final request = _MatchRequest.fromJson(Map<String, dynamic>.from(row));
+
+    if (request.matchOutcome == 'no_fit') {
+      return _MatchData(view: _View.noFit, request: request);
     }
 
-    final trainerRepository = TrainerRepository(client);
+    final hasTrainer = request.trainerId.isNotEmpty;
+    final viewable =
+        hasTrainer && (ConciergeStatus.isMatched(request.status) || ConciergeStatus.isClosed(request.status));
 
-    final trainers = await trainerRepository.getTrainers();
+    if (!viewable) {
+      return _MatchData(view: _View.detail, request: request);
+    }
 
-    Trainer? matchedTrainer;
+    final trainers = await TrainerRepository(client).getTrainers();
 
-    for (final trainer in trainers) {
-      if (trainer.id == trainerId) {
-        matchedTrainer = trainer;
-
+    Trainer? trainer;
+    for (final candidate in trainers) {
+      if (candidate.id == request.trainerId) {
+        trainer = candidate;
         break;
       }
     }
 
-    if (matchedTrainer == null) {
-      throw Exception('Matched trainer could not be found.');
+    if (trainer == null) {
+      // Trainer no longer listed: show the request record instead.
+      return _MatchData(view: _View.detail, request: request);
     }
 
-    return _MatchedTrainerData(request: request, trainer: matchedTrainer);
+    return _MatchData(view: _View.match, request: request, trainer: trainer);
+  }
+
+  void _retry() {
+    setState(() {
+      _future = _load();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  void _book(Trainer trainer) {
+    context.push(
+      GSWRoutes.bookingRequest,
+      extra: BookingRequestRouteData(trainer: trainer, sourceConciergeRequestId: widget.requestId),
+    );
+  }
+
+  void _viewProfile(Trainer trainer) {
+    context.push(GSWRoutes.trainerProfile, extra: trainer);
+  }
+
+  Future<void> _notQuiteRight(String firstName, {String initialReason = 'days_times'}) async {
+    final sent = await showConciergeSheet<bool>(
+      context: context,
+      builder: (_) => _RematchSheet(
+        requestId: widget.requestId,
+        firstName: firstName,
+        initialReason: initialReason,
+      ),
+    );
+
+    if (sent == true && mounted) {
+      conciergeSafePop(context, true);
+    }
+  }
+
+  /// 4.3 "Find someone within my budget": a real action, sends the request
+  /// straight back to matching with the price as the reason.
+  Future<void> _findWithinBudget(_MatchRequest request) async {
+    if (_isFindingWithinBudget) return;
+
+    setState(() {
+      _isFindingWithinBudget = true;
+    });
+
+    try {
+      final budget = ConciergeCopy.budgetRange(request.budgetMin, request.budgetMax);
+
+      await Supabase.instance.client.rpc(
+        'request_concierge_rematch',
+        params: {
+          'p_request_id': widget.requestId,
+          'p_reason': 'price',
+          'p_note': budget == null
+              ? 'Find someone within my budget.'
+              : 'Find someone within my budget of $budget.',
+        },
+      );
+
+      if (!mounted) return;
+
+      conciergeSafePop(context, true);
+    } catch (error) {
+      debugPrint('Find within budget failed: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _isFindingWithinBudget = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('We could not update your request. Please try again.')),
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_MatchData>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: GSWColors.backgroundPrimary,
+            body: Center(child: CircularProgressIndicator(color: GSWColors.primary)),
+          );
+        }
+
+        final data = snapshot.data;
+
+        if (snapshot.hasError || data == null) {
+          debugPrint('Matched trainer load failed: ${snapshot.error}');
+          return _buildError();
+        }
+
+        return switch (data.view) {
+          _View.noFit => NobodyFitsScreen(requestId: widget.requestId),
+          _View.detail => ConciergeRequestDetailView(requestId: widget.requestId),
+          _View.match => _buildMatch(data.request, data.trainer!),
+        };
+      },
+    );
+  }
+
+  Widget _buildError() {
+    return Scaffold(
+      backgroundColor: GSWColors.backgroundPrimary,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: ConciergeBackButton(onTap: () => conciergeSafePop(context)),
+              ),
+              const Spacer(),
+              Text(
+                'We could not load your trainer',
+                textAlign: TextAlign.center,
+                style: GSWTextStyles.titleLarge.copyWith(
+                  color: GSWColors.textPrimary,
+                  height: 30 / 24,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Check your connection and try again.',
+                textAlign: TextAlign.center,
+                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+              ),
+              const SizedBox(height: 24),
+              GSWButton(
+                size: GSWButtonSize.large,
+                variant: GSWButtonVariant.secondary,
+                label: 'Try again',
+                onPressed: _retry,
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMatch(_MatchRequest request, Trainer trainer) {
+    final gender = trainer.gender;
+    final firstName = trainer.fullName.trim().split(RegExp(r'\s+')).first;
+    final price = trainer.pricePerSession;
+
+    final budgetMax = request.budgetMax;
+    final overBy = price != null && budgetMax != null && price > budgetMax ? price - budgetMax : null;
+    final isAboveBudget = request.matchOutcome == 'outside_budget' || overBy != null;
+
+    final isActive = ConciergeStatus.isMatched(request.status);
+    final pickedOn = request.matchedAt;
+
+    final area = request.area.isNotEmpty ? request.area : (trainer.serviceArea?.trim() ?? '');
+
+    final whyLabel = isAboveBudget
+        ? 'WHY WE PICKED ${GSWPronoun.object(gender).toUpperCase()}, AND WHAT IT COSTS'
+        : 'WHY WE PICKED ${GSWPronoun.object(gender).toUpperCase()}';
+
+    final whyText = request.matchReason.isNotEmpty
+        ? request.matchReason
+        : request.fallbackReason(firstName: firstName, gender: gender, aboveBudget: isAboveBudget);
+
+    final bodyChildren = <Widget>[
+      _NameAndPrice(
+        firstName: firstName,
+        subtitle: ['Personal training', if (area.isNotEmpty) area].join(' · '),
+        price: price,
+        alignTotalRight: !isAboveBudget,
+      ),
+      if (isAboveBudget && overBy != null) _AboveBudgetNote(overBy: overBy, request: request),
+      _WhyCard(label: whyLabel, text: whyText),
+      TrainerVerificationRow(
+        onTap: () {
+          TrainerVerificationSheet.show(
+            context,
+            trainerName: trainer.fullName,
+            items: trainer.verificationChecks,
+          );
+        },
+      ),
+      if (pickedOn != null)
+        Text(
+          'Picked for you on ${GSWTime.dayLong(pickedOn).split(' ').skip(1).join(' ')}',
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary, height: 16 / 12),
+        ),
+      if (!isActive)
+        Text(
+          ConciergeStatus.isBooked(request.status)
+              ? 'This request became a session. You can still look at the trainer we picked.'
+              : 'This request is closed. You can still look at the trainer we picked.',
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 16 / 12),
+        ),
+    ];
+
+    final spaced = <Widget>[];
+    for (var index = 0; index < bodyChildren.length; index++) {
+      if (index > 0) spaced.add(const SizedBox(height: 24));
+      spaced.add(bodyChildren[index]);
+    }
+
+    return Scaffold(
+      backgroundColor: GSWColors.backgroundPrimary,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Hero(
+                      name: trainer.fullName,
+                      imagePath: trainer.profileImageUrl,
+                      onBack: () => conciergeSafePop(context),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: spaced,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          _BottomBar(
+            bookLabel: GSWPronoun.subject(gender) == 'they'
+                ? 'Book a session with $firstName'
+                : 'Book a session with ${GSWPronoun.object(gender)}',
+            onBook: isActive ? () => _book(trainer) : null,
+            showBook: isActive,
+            alts: isAboveBudget && isActive
+                ? _Alts.column([
+                    _AltAction(
+                      label: 'Find someone within my budget',
+                      accent: true,
+                      busy: _isFindingWithinBudget,
+                      onTap: () => _findWithinBudget(request),
+                    ),
+                    _AltAction(
+                      label: 'Not quite right?',
+                      accent: false,
+                      onTap: _isFindingWithinBudget ? null : () => _notQuiteRight(firstName),
+                    ),
+                  ])
+                : _Alts.row([
+                    _AltAction(
+                      label: 'View full profile',
+                      accent: true,
+                      onTap: () => _viewProfile(trainer),
+                    ),
+                    if (isActive)
+                      _AltAction(
+                        label: 'Not quite right?',
+                        accent: false,
+                        onTap: () => _notQuiteRight(firstName),
+                      ),
+                  ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Sections
+// -----------------------------------------------------------------------------
+
+class _Hero extends StatelessWidget {
+  const _Hero({required this.name, required this.imagePath, required this.onBack});
+
+  final String name;
+  final String? imagePath;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = conciergeTrainerImageUrl(imagePath);
+    final topInset = MediaQuery.of(context).padding.top;
+
+    final placeholder = Container(
+      color: GSWColors.surfaceInteractive,
+      alignment: Alignment.topCenter,
+      padding: EdgeInsets.only(top: topInset + 58),
+      child: Opacity(
+        opacity: 0.45,
+        child: Text(
+          conciergeInitials(name),
+          style: GSWTextStyles.displayLarge.copyWith(
+            color: GSWColors.textAccent,
+            fontSize: 72,
+            height: 76 / 72,
+          ),
+        ),
+      ),
+    );
+
+    return SizedBox(
+      height: 278 + topInset,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (url == null)
+            placeholder
+          else
+            Image.network(
+              url,
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              errorBuilder: (context, error, stackTrace) => placeholder,
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 100 + topInset,
+            bottom: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    GSWColors.backgroundPrimary.withValues(alpha: 0),
+                    GSWColors.backgroundPrimary.withValues(alpha: 0.5),
+                    GSWColors.backgroundPrimary,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 24,
+            top: topInset + 24,
+            child: ConciergeBackButton(onTap: onBack, overlay: true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NameAndPrice extends StatelessWidget {
+  const _NameAndPrice({
+    required this.firstName,
+    required this.subtitle,
+    required this.price,
+    required this.alignTotalRight,
+  });
+
+  final String firstName;
+  final String subtitle;
+  final double? price;
+  final bool alignTotalRight;
+
+  @override
+  Widget build(BuildContext context) {
+    final price = this.price;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'WE PICKED ${firstName.toUpperCase()}',
+          style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary, height: 1),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+        ),
+        if (price != null) ...[
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    GSWMoney.aed(price),
+                    style: GSWTextStyles.displaySmall.copyWith(
+                      color: GSWColors.textAccent,
+                      height: 1,
+                    ),
+                  ),
+                  Text(
+                    '/session',
+                    style: GSWTextStyles.bodySmall.copyWith(
+                      color: GSWColors.textSecondary,
+                      height: 16 / 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${GSWMoney.aed(GSWMoney.totalWithFee(price))} total, including the 5% service fee',
+                  textAlign: alignTotalRight ? TextAlign.right : TextAlign.left,
+                  style: GSWTextStyles.bodySmall.copyWith(
+                    color: GSWColors.textSecondary,
+                    height: 18 / 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AboveBudgetNote extends StatelessWidget {
+  const _AboveBudgetNote({required this.overBy, required this.request});
+
+  final double overBy;
+  final _MatchRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final budget = ConciergeCopy.budgetRange(request.budgetMin, request.budgetMax);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: GSWColors.surfaceInteractive,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+      ),
+      child: Text(
+        budget == null
+            ? '${GSWMoney.aed(overBy)} above your stated budget.'
+            : '${GSWMoney.aed(overBy)} above your stated budget of $budget.',
+        style: GSWTextStyles.bodyMedium.copyWith(
+          color: GSWColors.textAccent,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          height: 19 / 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _WhyCard extends StatelessWidget {
+  const _WhyCard({required this.label, required this.text});
+
+  final String label;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: GSWColors.surfacePrimary,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: GSWTextStyles.bodyExtraSmall.copyWith(
+              color: GSWColors.textAccent,
+              fontWeight: FontWeight.w500,
+              height: 12 / 11,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 20 / 14),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AltAction {
+  const _AltAction({required this.label, required this.accent, required this.onTap, this.busy = false});
+
+  final String label;
+  final bool accent;
+  final VoidCallback? onTap;
+  final bool busy;
+}
+
+class _Alts {
+  const _Alts._(this.actions, this.stacked);
+
+  factory _Alts.row(List<_AltAction> actions) => _Alts._(actions, false);
+  factory _Alts.column(List<_AltAction> actions) => _Alts._(actions, true);
+
+  final List<_AltAction> actions;
+  final bool stacked;
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({
+    required this.bookLabel,
+    required this.onBook,
+    required this.showBook,
+    required this.alts,
+  });
+
+  final String bookLabel;
+  final VoidCallback? onBook;
+  final bool showBook;
+  final _Alts alts;
+
+  Widget _action(_AltAction action) {
+    if (action.busy) {
+      return const SizedBox(
+        height: 20,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: GSWColors.primary),
+          ),
+        ),
+      );
+    }
+
+    return ConciergeTextAction(label: action.label, accent: action.accent, onTap: action.onTap);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GSWColors.backgroundPrimary,
+    final altWidgets = alts.actions.map(_action).toList();
 
-      body: FutureBuilder<_MatchedTrainerData>(
-        future: _dataFuture,
-
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const SafeArea(
-              child: Center(child: CircularProgressIndicator(color: GSWColors.primary)),
-            );
-          }
-
-          if (snapshot.hasError || snapshot.data == null) {
-            return _buildErrorState();
-          }
-
-          return _buildContent(snapshot.data!);
-        },
-      ),
-    );
-  }
-
-  Widget _buildContent(_MatchedTrainerData data) {
-    final request = data.request;
-
-    final trainer = data.trainer;
-
-    final fullName = trainer.fullName;
-
-    final status = request['status']?.toString().trim().toLowerCase() ?? '';
-
-    final isReadOnly = status == 'cancelled' || status == 'canceled';
-
-    final firstName = fullName.split(RegExp(r'\s+')).first;
-
-    final gender = trainer.gender?.trim().toLowerCase() ?? '';
-
-    final profileImage = trainer.profileImageUrl;
-
-    final price = trainer.pricePerSession;
-
-    final serviceArea = trainer.serviceArea?.trim() ?? '';
-
-    final availability = trainer.availabilityNote?.trim() ?? '';
-
-    final subjectPronoun = gender == 'female'
-        ? 'She'
-        : gender == 'male'
-        ? 'He'
-        : 'They';
-
-    final objectPronoun = gender == 'female'
-        ? 'her'
-        : gender == 'male'
-        ? 'him'
-        : 'them';
-
-    final possessivePronoun = gender == 'female'
-        ? 'her'
-        : gender == 'male'
-        ? 'his'
-        : 'their';
-
-    final goal = request['goal']?.toString().trim() ?? '';
-
-    final preferredTime = request['preferred_time']?.toString().trim() ?? '';
-
-    final preferredArea = request['preferred_area']?.toString().trim() ?? '';
-
-    final rawDays = request['preferred_days'];
-
-    final preferredDays = rawDays is List
-        ? rawDays.map((day) => day.toString()).toList()
-        : <String>[];
-
-    final location = request['training_locations'];
-
-    String trainingLocation = '';
-
-    if (location is Map) {
-      trainingLocation = location['name']?.toString().trim() ?? '';
+    final Widget altsWidget;
+    if (alts.stacked) {
+      final children = <Widget>[];
+      for (var index = 0; index < altWidgets.length; index++) {
+        if (index > 0) children.add(const SizedBox(height: 10));
+        children.add(altWidgets[index]);
+      }
+      altsWidget = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+    } else {
+      final children = <Widget>[];
+      for (var index = 0; index < altWidgets.length; index++) {
+        if (index > 0) children.add(const SizedBox(width: 24));
+        children.add(altWidgets[index]);
+      }
+      altsWidget = Row(mainAxisAlignment: MainAxisAlignment.center, children: children);
     }
 
-    final budgetMin = request['budget_min'] as num?;
-
-    final budgetMax = request['budget_max'] as num?;
-
-    final matchOutcome = request['match_outcome']?.toString().trim().toLowerCase() ?? '';
-
-    final matchReason = request['match_reason']?.toString().trim() ?? '';
-
-    final matchedAt = DateTime.tryParse(request['matched_at']?.toString() ?? '');
-
-    final isOutsideBudget = matchOutcome == 'outside_budget';
-
-    final serviceFee = price == null ? null : price * 0.05;
-
-    final total = price == null ? null : price + serviceFee!;
-
-    final budgetDifference = price != null && budgetMax != null && price > budgetMax
-        ? price - budgetMax
-        : null;
-
-    return Column(
-      children: [
-        Expanded(
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-
-                children: [
-                  _buildHero(fullName: fullName, imagePath: profileImage),
-
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-
-                                children: [
-                                  Text(
-                                    'We picked $firstName',
-
-                                    style: GSWTextStyles.titleLarge.copyWith(
-                                      color: GSWColors.textPrimary,
-
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 4),
-
-                                  Text(
-                                    preferredArea.isNotEmpty
-                                        ? 'Personal training · $preferredArea'
-                                        : serviceArea.isNotEmpty
-                                        ? 'Personal training · $serviceArea'
-                                        : 'Personal training',
-
-                                    style: GSWTextStyles.bodySmall.copyWith(
-                                      color: GSWColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                            const SizedBox(width: 12),
-
-                            _buildViewProfileButton(),
-                          ],
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        _buildFitCard(
-                          goal: goal,
-
-                          preferredDays: preferredDays,
-
-                          preferredTime: preferredTime,
-
-                          preferredArea: preferredArea,
-
-                          trainingLocation: trainingLocation,
-
-                          budgetMin: budgetMin,
-
-                          budgetMax: budgetMax,
-
-                          trainerPrice: price,
-
-                          subjectPronoun: subjectPronoun,
-
-                          possessivePronoun: possessivePronoun,
-
-                          availability: availability,
-
-                          serviceArea: serviceArea,
-
-                          isOutsideBudget: isOutsideBudget,
-
-                          budgetDifference: budgetDifference,
-
-                          matchReason: matchReason,
-
-                          firstName: firstName,
-                        ),
-
-                        const SizedBox(height: 18),
-
-                        _buildCostCard(
-                          price: price,
-
-                          serviceFee: serviceFee,
-
-                          total: total,
-
-                          area: preferredArea.isNotEmpty ? preferredArea : serviceArea,
-                        ),
-
-                        const SizedBox(height: 18),
-
-                        TrainerVerificationRow(
-                          onTap: () {
-                            TrainerVerificationSheet.show(
-                              context,
-
-                              trainerName: trainer.fullName,
-
-                              items: trainer.verificationChecks,
-                            );
-                          },
-                        ),
-
-                        const SizedBox(height: 18),
-
-                        Text(
-                          'We recommend on what you told us and each trainer\'s experience, area, availability and price. No trainer can pay to be recommended.',
-
-                          style: GSWTextStyles.bodyExtraSmall.copyWith(
-                            color: GSWColors.textSecondary,
-
-                            height: 1.45,
-                          ),
-                        ),
-
-                        if (!isReadOnly && isOutsideBudget) ...[
-                          const SizedBox(height: 24),
-
-                          Center(
-                            child: TextButton(
-                              onPressed: () {
-                                _showNotQuiteRightSheet(firstName: firstName);
-                              },
-
-                              child: Text(
-                                'Not quite right?',
-
-                                style: GSWTextStyles.bodyMedium.copyWith(
-                                  color: GSWColors.primary,
-
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-
-                        if (matchedAt != null && !isOutsideBudget) ...[
-                          const SizedBox(height: 16),
-
-                          Text(
-                            'Picked for you on ${_formatDate(matchedAt)}',
-
-                            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-                          ),
-                        ],
-
-                        if (isReadOnly) ...[
-                          const SizedBox(height: 10),
-
-                          Text(
-                            'This request was cancelled. You can still review the trainer we matched you with.',
-                            style: GSWTextStyles.bodySmall.copyWith(
-                              color: GSWColors.textSecondary,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-
-        if (!isReadOnly)
-          _buildBottomActions(
-            firstName: firstName,
-
-            objectPronoun: objectPronoun,
-
-            isOutsideBudget: isOutsideBudget,
-
-            trainer: trainer,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildHero({required String fullName, required String? imagePath}) {
-    final imageUrl = _trainerImageUrl(imagePath);
-
-    return SizedBox(
-      width: double.infinity,
-
-      height: 270,
-
-      child: Stack(
-        fit: StackFit.expand,
-
+    return Container(
+      color: GSWColors.surfacePrimary,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 28 + MediaQuery.of(context).padding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (imageUrl != null)
-            Image.network(
-              imageUrl,
-
-              fit: BoxFit.cover,
-
-              alignment: const Alignment(0, -0.9),
-
-              errorBuilder: (context, error, stackTrace) {
-                return _buildImageFallback(fullName);
-              },
-            )
-          else
-            _buildImageFallback(fullName),
-
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-
-                end: Alignment.bottomCenter,
-
-                stops: [0, 0.68, 1],
-
-                colors: [Colors.transparent, Colors.transparent, GSWColors.backgroundPrimary],
-              ),
+          if (showBook) ...[
+            GSWButton(
+              size: GSWButtonSize.large,
+              variant: GSWButtonVariant.primary,
+              label: bookLabel,
+              onPressed: onBook,
             ),
-          ),
-
-          Positioned(
-            left: 20,
-
-            top: MediaQuery.of(context).padding.top + 18,
-
-            child: _buildBackButton(),
-          ),
+            const SizedBox(height: 12),
+          ],
+          altsWidget,
         ],
       ),
     );
   }
+}
 
-  Widget _buildBackButton() {
-    return InkWell(
-      onTap: () => context.pop(),
+// -----------------------------------------------------------------------------
+// "Not quite right?" sheet
+// -----------------------------------------------------------------------------
 
-      borderRadius: BorderRadius.circular(999),
+/// Owns its note controller so it is disposed only after the sheet has
+/// finished animating out.
+class _RematchSheet extends StatefulWidget {
+  const _RematchSheet({
+    required this.requestId,
+    required this.firstName,
+    required this.initialReason,
+  });
 
-      child: Container(
-        width: 44,
+  final String requestId;
+  final String firstName;
+  final String initialReason;
 
-        height: 44,
+  @override
+  State<_RematchSheet> createState() => _RematchSheetState();
+}
 
-        decoration: BoxDecoration(
-          color: GSWColors.backgroundPrimary,
+class _RematchSheetState extends State<_RematchSheet> {
+  static const List<MapEntry<String, String>> _reasons = [
+    MapEntry('price', 'The price'),
+    MapEntry('days_times', 'The days or times'),
+    MapEntry('area', 'The area or place'),
+    MapEntry('trainer', "I'd like a different trainer"),
+    MapEntry('other', 'Something else'),
+  ];
 
-          shape: BoxShape.circle,
+  final TextEditingController _noteController = TextEditingController();
 
-          border: Border.all(color: GSWColors.borderSecondary),
-        ),
+  late String _reason;
+  bool _isSending = false;
+  String? _error;
 
-        child: const Icon(Icons.chevron_left, color: GSWColors.primary, size: 28),
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _reason = widget.initialReason;
   }
 
-  Widget _buildViewProfileButton() {
-    return SizedBox(
-      height: 38,
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
 
-      child: OutlinedButton(
-        onPressed: () {
-          // Trainer profile routing comes next.
+  Future<void> _send() async {
+    if (_isSending) return;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    setState(() {
+      _isSending = true;
+      _error = null;
+    });
+
+    try {
+      final note = _noteController.text.trim();
+
+      await Supabase.instance.client.rpc(
+        'request_concierge_rematch',
+        params: {
+          'p_request_id': widget.requestId,
+          'p_reason': _reason,
+          'p_note': note.isEmpty ? null : note,
         },
+      );
 
-        style: OutlinedButton.styleFrom(
-          backgroundColor: GSWColors.surfaceElevated,
+      if (!mounted) return;
 
-          foregroundColor: GSWColors.textPrimary,
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      debugPrint('Request concierge rematch failed: $error');
 
-          side: const BorderSide(color: GSWColors.borderSecondary),
+      if (!mounted) return;
 
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-        ),
-
-        child: Text(
-          'View profile',
-
-          style: GSWTextStyles.bodySmall.copyWith(
-            color: GSWColors.textPrimary,
-
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
+      setState(() {
+        _isSending = false;
+        _error = error.toString().contains('MATCH_REQUEST_NOT_FOUND')
+            ? 'This match has already changed. Go back to see the latest.'
+            : 'We could not update your request. Please try again.';
+      });
+    }
   }
 
-  Widget _buildFitCard({
-    required String goal,
-
-    required List<String> preferredDays,
-
-    required String preferredTime,
-
-    required String preferredArea,
-
-    required String trainingLocation,
-
-    required num? budgetMin,
-
-    required num? budgetMax,
-
-    required num? trainerPrice,
-
-    required String subjectPronoun,
-
-    required String possessivePronoun,
-
-    required String availability,
-
-    required String serviceArea,
-
-    required bool isOutsideBudget,
-
-    required num? budgetDifference,
-
-    required String matchReason,
-
-    required String firstName,
-  }) {
-    final goalLabel = _goalHeadline(goal);
-
-    final scheduleLabel = _scheduleLabel(preferredDays, preferredTime);
-
-    final areaLabel = preferredArea.isNotEmpty
-        ? 'A gym in $preferredArea'
-        : trainingLocation.isNotEmpty
-        ? trainingLocation
-        : serviceArea;
-
-    final budgetLabel = budgetMin != null && budgetMax != null
-        ? 'AED ${_money(budgetMin)} to ${_money(budgetMax)} a session'
-        : 'Your preferred budget';
-
-    final fitCount = isOutsideBudget ? 3 : 4;
-
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.all(16),
-
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(14),
-      ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-          Row(
+  @override
+  Widget build(BuildContext context) {
+    return ConciergeSheet(
+      children: [
+        const ConciergeSheetHeading(
+          title: "What's not right?",
+          intro: "Tell us and we'll keep looking. There's no obligation to book.",
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: GSWColors.surfacePrimary,
+            borderRadius: BorderRadius.circular(GSWRadius.card),
+          ),
+          child: Column(
             children: [
-              Expanded(
-                child: Text(
-                  '${_capitalize(subjectPronoun.toLowerCase()) == 'She' ? 'How she fits' : 'How he fits'} what you asked for',
-
-                  style: GSWTextStyles.bodyMedium.copyWith(
-                    color: GSWColors.textPrimary,
-
-                    fontWeight: FontWeight.w600,
+              for (var index = 0; index < _reasons.length; index++) ...[
+                if (index > 0)
+                  Container(
+                    height: 1,
+                    margin: const EdgeInsets.symmetric(horizontal: 14),
+                    color: GSWColors.surfaceInteractive,
                   ),
+                _ReasonOption(
+                  label: _reasons[index].value,
+                  selected: _reason == _reasons[index].key,
+                  onTap: _isSending
+                      ? null
+                      : () {
+                          setState(() {
+                            _reason = _reasons[index].key;
+                            _error = null;
+                          });
+                        },
                 ),
-              ),
-
-              Text(
-                '$fitCount of 4',
-
-                style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-              ),
+              ],
             ],
           ),
-
-          const SizedBox(height: 16),
-
-          _buildFitRow(
-            title: goalLabel,
-
-            subtitle: 'Personal training is what ${subjectPronoun.toLowerCase()} does',
-
-            warning: false,
-          ),
-
-          const SizedBox(height: 16),
-
-          _buildFitRow(
-            title: scheduleLabel,
-
-            subtitle: availability.isNotEmpty
-                ? availability
-                : '$subjectPronoun has availability around those times',
-
-            warning: false,
-          ),
-
-          const SizedBox(height: 16),
-
-          _buildFitRow(
-            title: areaLabel,
-
-            subtitle: serviceArea.isNotEmpty
-                ? '$subjectPronoun trains in $serviceArea'
-                : '$subjectPronoun trains around your preferred area',
-
-            warning: false,
-          ),
-
-          const SizedBox(height: 16),
-
-          _buildFitRow(
-            title: budgetLabel,
-
-            subtitle: trainerPrice == null
-                ? 'Price confirmed before booking'
-                : isOutsideBudget
-                ? '$subjectPronoun charges AED ${_money(trainerPrice)}'
-                : 'AED ${_money(trainerPrice)}, inside your budget',
-
-            warning: isOutsideBudget,
-
-            trailing: isOutsideBudget && budgetDifference != null
-                ? 'AED ${_money(budgetDifference)} over'
-                : null,
-          ),
-
-          if (matchReason.isNotEmpty) ...[
-            const SizedBox(height: 16),
-
-            Divider(height: 1, color: GSWColors.neutral700),
-
-            const SizedBox(height: 14),
-
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text(
-              isOutsideBudget ? 'Why someone above your budget' : 'Why $firstName',
-
+              'Anything to add? (optional)',
               style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
             ),
-
             const SizedBox(height: 8),
-
-            Text(
-              matchReason,
-
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textPrimary, height: 1.45),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFitRow({
-    required String title,
-
-    required String subtitle,
-
-    required bool warning,
-
-    String? trailing,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-
-      children: [
-        Container(
-          width: 18,
-
-          height: 18,
-
-          margin: const EdgeInsets.only(top: 1),
-
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-
-            border: Border.all(color: warning ? GSWColors.textPrimary : GSWColors.textPrimary),
-          ),
-
-          child: Icon(
-            warning ? Icons.priority_high : Icons.check,
-
-            size: 12,
-
-            color: GSWColors.textPrimary,
-          ),
-        ),
-
-        const SizedBox(width: 12),
-
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-
-                      style: GSWTextStyles.bodySmall.copyWith(
-                        color: GSWColors.textPrimary,
-
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-
-                  if (trailing != null) ...[
-                    const SizedBox(width: 8),
-
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-
-                      decoration: BoxDecoration(
-                        color: GSWColors.surfaceInteractive,
-
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-
-                      child: Text(
-                        trailing,
-
-                        style: GSWTextStyles.bodyExtraSmall.copyWith(
-                          color: GSWColors.textPrimary,
-
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-
-              const SizedBox(height: 3),
-
-              Text(
-                subtitle,
-
-                style: GSWTextStyles.bodyExtraSmall.copyWith(
-                  color: GSWColors.textSecondary,
-
-                  height: 1.35,
+            TextField(
+              controller: _noteController,
+              enabled: !_isSending,
+              maxLines: 2,
+              maxLength: 250,
+              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'For example, evenings would suit me better',
+                hintStyle: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                counterText: '',
+                filled: true,
+                fillColor: GSWColors.surfacePrimary,
+                contentPadding: const EdgeInsets.all(14),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(GSWRadius.control),
+                  borderSide: const BorderSide(color: GSWColors.borderSecondary),
+                ),
+                disabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(GSWRadius.control),
+                  borderSide: const BorderSide(color: GSWColors.borderDisabled),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(GSWRadius.control),
+                  borderSide: const BorderSide(color: GSWColors.borderFocused),
                 ),
               ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCostCard({
-    required num? price,
-
-    required num? serviceFee,
-
-    required num? total,
-
-    required String area,
-  }) {
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.all(16),
-
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(14),
-      ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-          Text(
-            'What a session costs',
-
-            style: GSWTextStyles.bodyMedium.copyWith(
-              color: GSWColors.textPrimary,
-
-              fontWeight: FontWeight.w600,
             ),
-          ),
-
-          const SizedBox(height: 16),
-
-          _buildPriceRow('Session, 60 minutes', price == null ? '—' : 'AED ${_moneyFixed(price)}'),
-
-          const SizedBox(height: 14),
-
-          _buildPriceRow(
-            'Service fee (5%)',
-
-            serviceFee == null ? '—' : 'AED ${_moneyFixed(serviceFee)}',
-          ),
-
-          const SizedBox(height: 12),
-
-          Divider(height: 1, color: GSWColors.neutral700),
-
-          const SizedBox(height: 14),
-
-          _buildPriceRow('Total', total == null ? '—' : 'AED ${_moneyFixed(total)}', bold: true),
-
-          if (area.isNotEmpty) ...[
-            const SizedBox(height: 10),
-
+            const SizedBox(height: 6),
             Text(
-              'In $area. You choose the time next.',
-
+              "Please don't include health details.",
               style: GSWTextStyles.bodyExtraSmall.copyWith(color: GSWColors.textSecondary),
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.error)),
+            ],
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPriceRow(String label, String value, {bool bold = false}) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-
-            style: GSWTextStyles.bodySmall.copyWith(
-              color: bold ? GSWColors.textPrimary : GSWColors.textSecondary,
-
-              fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
         ),
-
-        Text(
-          value,
-
-          style: GSWTextStyles.bodySmall.copyWith(
-            color: GSWColors.textPrimary,
-
-            fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomActions({
-    required String firstName,
-
-    required String objectPronoun,
-
-    required bool isOutsideBudget,
-
-    required trainer,
-  }) {
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-
-      color: GSWColors.surfacePrimary,
-
-      child: SafeArea(
-        top: false,
-
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             GSWButton(
               size: GSWButtonSize.large,
-
               variant: GSWButtonVariant.primary,
-
-              label: 'Book a session with $firstName',
-
-              onPressed: () {
-                context.push(
-                  GSWRoutes.bookingRequest,
-
-                  extra: BookingRequestRouteData(
-                    trainer: trainer,
-
-                    sourceConciergeRequestId: widget.requestId,
-                  ),
-                );
-              },
+              label: 'Send and keep looking',
+              isLoading: _isSending,
+              onPressed: _isSending ? null : _send,
             ),
-
-            if (isOutsideBudget) ...[
-              const SizedBox(height: 8),
-
-              GSWButton(
-                size: GSWButtonSize.large,
-
-                variant: GSWButtonVariant.secondary,
-
-                label: 'Find someone within my budget',
-
-                onPressed: () {
-                  _showNotQuiteRightSheet(firstName: firstName);
-                },
-              ),
-            ] else ...[
-              const SizedBox(height: 8),
-
-              TextButton(
-                onPressed: () {
-                  _showNotQuiteRightSheet(firstName: firstName);
-                },
-
-                child: Text(
-                  'Not quite right?',
-
-                  style: GSWTextStyles.bodyMedium.copyWith(
-                    color: GSWColors.primary,
-
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+            const SizedBox(height: 20),
+            GSWButton(
+              size: GSWButtonSize.large,
+              variant: GSWButtonVariant.tertiary,
+              label: 'Keep ${widget.firstName} as my match',
+              onPressed: _isSending ? null : () => Navigator.of(context).pop(false),
+            ),
           ],
         ),
-      ),
+      ],
     );
   }
+}
 
-  Future<void> _showNotQuiteRightSheet({required String firstName}) async {
-    final noteController = TextEditingController();
+class _ReasonOption extends StatelessWidget {
+  const _ReasonOption({required this.label, required this.selected, required this.onTap});
 
-    String selectedReason = 'days_times';
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
 
-    final submitted = await showModalBottomSheet<bool>(
-      context: context,
-
-      isScrollControlled: true,
-
-      backgroundColor: Colors.transparent,
-
-      barrierColor: Colors.black,
-
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: GSWColors.backgroundPrimary,
-
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-
-                child: SafeArea(
-                  top: false,
-
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-
-                    crossAxisAlignment: CrossAxisAlignment.start,
-
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 40,
-
-                          height: 4,
-
-                          decoration: BoxDecoration(
-                            color: GSWColors.borderSecondary,
-
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      Text(
-                        'What\'s not right?',
-
-                        style: GSWTextStyles.titleLarge.copyWith(
-                          color: GSWColors.textPrimary,
-
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Text(
-                        'Tell us and we\'ll keep looking. There\'s no obligation to book.',
-
-                        style: GSWTextStyles.bodySmall.copyWith(
-                          color: GSWColors.textSecondary,
-
-                          height: 1.45,
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      Container(
-                        decoration: BoxDecoration(
-                          color: GSWColors.surfacePrimary,
-
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-
-                        child: Column(
-                          children: [
-                            _buildReasonOption(
-                              label: 'The price',
-
-                              value: 'price',
-
-                              selectedValue: selectedReason,
-
-                              onTap: () {
-                                setSheetState(() {
-                                  selectedReason = 'price';
-                                });
-                              },
-                            ),
-
-                            _buildSheetDivider(),
-
-                            _buildReasonOption(
-                              label: 'The days or times',
-
-                              value: 'days_times',
-
-                              selectedValue: selectedReason,
-
-                              onTap: () {
-                                setSheetState(() {
-                                  selectedReason = 'days_times';
-                                });
-                              },
-                            ),
-
-                            _buildSheetDivider(),
-
-                            _buildReasonOption(
-                              label: 'The area or place',
-
-                              value: 'area',
-
-                              selectedValue: selectedReason,
-
-                              onTap: () {
-                                setSheetState(() {
-                                  selectedReason = 'area';
-                                });
-                              },
-                            ),
-
-                            _buildSheetDivider(),
-
-                            _buildReasonOption(
-                              label: 'I\'d like a different trainer',
-
-                              value: 'trainer',
-
-                              selectedValue: selectedReason,
-
-                              onTap: () {
-                                setSheetState(() {
-                                  selectedReason = 'trainer';
-                                });
-                              },
-                            ),
-
-                            _buildSheetDivider(),
-
-                            _buildReasonOption(
-                              label: 'Something else',
-
-                              value: 'other',
-
-                              selectedValue: selectedReason,
-
-                              onTap: () {
-                                setSheetState(() {
-                                  selectedReason = 'other';
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      Text(
-                        'Anything to add? (optional)',
-
-                        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      TextField(
-                        controller: noteController,
-
-                        maxLines: 2,
-
-                        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-
-                        decoration: InputDecoration(
-                          hintText: 'For example, evenings would suit me better',
-
-                          hintStyle: GSWTextStyles.bodyMedium.copyWith(
-                            color: GSWColors.textSecondary,
-                          ),
-
-                          filled: true,
-
-                          fillColor: GSWColors.surfacePrimary,
-
-                          contentPadding: const EdgeInsets.all(14),
-
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-
-                            borderSide: const BorderSide(color: GSWColors.borderSecondary),
-                          ),
-
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-
-                            borderSide: const BorderSide(color: GSWColors.primary),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        'Please don\'t include health details.',
-
-                        style: GSWTextStyles.bodyExtraSmall.copyWith(
-                          color: GSWColors.textSecondary,
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      SizedBox(
-                        width: double.infinity,
-
-                        child: GSWButton(
-                          size: GSWButtonSize.large,
-
-                          variant: GSWButtonVariant.primary,
-
-                          label: 'Send and keep looking',
-
-                          onPressed: () async {
-                            try {
-                              FocusManager.instance.primaryFocus?.unfocus();
-
-                              await Supabase.instance.client.rpc(
-                                'request_concierge_rematch',
-
-                                params: {
-                                  'p_request_id': widget.requestId,
-
-                                  'p_reason': selectedReason,
-
-                                  'p_note': noteController.text.trim().isEmpty
-                                      ? null
-                                      : noteController.text.trim(),
-                                },
-                              );
-
-                              if (!sheetContext.mounted) return;
-
-                              // Only close the bottom sheet here.
-
-                              Navigator.of(sheetContext).pop(true);
-                            } catch (error) {
-                              debugPrint('Request concierge rematch failed: $error');
-
-                              if (!sheetContext.mounted) return;
-
-                              ScaffoldMessenger.of(sheetContext).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'We could not update your request. Please try again.',
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Center(
-                        child: TextButton(
-                          onPressed: () {
-                            Navigator.of(sheetContext).pop(false);
-                          },
-
-                          child: Text(
-                            'Keep $firstName as my match',
-
-                            style: GSWTextStyles.bodyMedium.copyWith(
-                              color: GSWColors.primary,
-
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    noteController.dispose();
-
-    if (submitted != true || !mounted) {
-      return;
-    }
-
-    // Return the successful rematch result to YourMatchScreen.
-
-    context.pop(true);
-  }
-
-  Widget _buildReasonOption({
-    required String label,
-
-    required String value,
-
-    required String selectedValue,
-
-    required VoidCallback onTap,
-  }) {
-    final selected = value == selectedValue;
-
+  @override
+  Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
-
         child: Row(
           children: [
             Expanded(
               child: Text(
                 label,
-
-                style: GSWTextStyles.bodySmall.copyWith(
+                style: GSWTextStyles.bodyMedium.copyWith(
                   color: GSWColors.textPrimary,
-
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
                 ),
               ),
             ),
-
             Container(
               width: 20,
-
               height: 20,
-
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-
-                border: Border.all(
-                  color: selected ? GSWColors.primary : GSWColors.textSecondary,
-
-                  width: selected ? 2 : 1.5,
-                ),
+                color: selected ? GSWColors.primary : Colors.transparent,
+                border: selected ? null : Border.all(color: GSWColors.borderSecondary, width: 1.5),
               ),
-
-              child: selected
-                  ? Center(
-                      child: Container(
-                        width: 8,
-
-                        height: 8,
-
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-
-                          color: GSWColors.primary,
-                        ),
-                      ),
-                    )
-                  : null,
             ),
           ],
         ),
       ),
     );
   }
-
-  Widget _buildSheetDivider() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-
-      child: Divider(height: 1, color: GSWColors.neutral700),
-    );
-  }
-
-  Widget _buildImageFallback(String name) {
-    final initials = name
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .take(2)
-        .map((part) => part[0].toUpperCase())
-        .join();
-
-    return Container(
-      color: GSWColors.surfaceInteractive,
-
-      alignment: Alignment.center,
-
-      child: Text(
-        initials.isEmpty ? 'T' : initials,
-
-        style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.primary),
-      ),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-
-          child: Text(
-            'We could not load your trainer.',
-
-            textAlign: TextAlign.center,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String? _trainerImageUrl(String? imagePath) {
-    if (imagePath == null || imagePath.isEmpty) {
-      return null;
-    }
-
-    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-      return imagePath;
-    }
-
-    return Supabase.instance.client.storage.from('trainer-images').getPublicUrl(imagePath);
-  }
-
-  String _goalHeadline(String value) {
-    switch (value.trim().toLowerCase()) {
-      case 'lose weight':
-        return 'Lose weight and build a routine';
-
-      case 'get stronger':
-        return 'Get stronger and build a routine';
-
-      case 'move better':
-        return 'Move better and build a routine';
-
-      case 'back after a break':
-        return 'Get back into a routine';
-
-      case 'pre or postnatal':
-        return 'Build a supported routine';
-
-      default:
-        return _capitalize(value);
-    }
-  }
-
-  String _scheduleLabel(List<String> days, String time) {
-    final shortDays = days.map(_shortDay).toList();
-
-    String dayText = '';
-
-    if (shortDays.length == 1) {
-      dayText = shortDays.first;
-    } else if (shortDays.length == 2) {
-      dayText = '${shortDays[0]} and ${shortDays[1]}';
-    } else if (shortDays.length > 2) {
-      dayText = '${shortDays.sublist(0, shortDays.length - 1).join(', ')} and ${shortDays.last}';
-    }
-
-    final normalizedTime = time.trim().toLowerCase();
-
-    final timeText = switch (normalizedTime) {
-      'morning' => 'mornings',
-      'afternoon' => 'afternoons',
-      'evening' => 'evenings',
-      _ => normalizedTime,
-    };
-
-    if (dayText.isEmpty) {
-      return _capitalize(timeText);
-    }
-
-    return '$dayText $timeText';
-  }
-
-  String _shortDay(String value) {
-    switch (value.trim().toLowerCase()) {
-      case 'monday':
-        return 'Mon';
-
-      case 'tuesday':
-        return 'Tue';
-
-      case 'wednesday':
-        return 'Wed';
-
-      case 'thursday':
-        return 'Thu';
-
-      case 'friday':
-        return 'Fri';
-
-      case 'saturday':
-        return 'Sat';
-
-      case 'sunday':
-        return 'Sun';
-
-      default:
-        return value;
-    }
-  }
-
-  String _formatDate(DateTime date) {
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    return '${date.day} ${months[date.month - 1]}';
-  }
-
-  String _capitalize(String value) {
-    final trimmed = value.trim();
-
-    if (trimmed.isEmpty) {
-      return trimmed;
-    }
-
-    return '${trimmed[0].toUpperCase()}${trimmed.substring(1)}';
-  }
-
-  String _money(num value) {
-    final number = value.toDouble();
-
-    if (number == number.roundToDouble()) {
-      return number.toStringAsFixed(0);
-    }
-
-    return number.toStringAsFixed(2);
-  }
-
-  String _moneyFixed(num value) {
-    return value.toDouble().toStringAsFixed(2);
-  }
 }
 
-class _MatchedTrainerData {
-  const _MatchedTrainerData({required this.request, required this.trainer});
+// -----------------------------------------------------------------------------
+// Data
+// -----------------------------------------------------------------------------
 
-  final Map<String, dynamic> request;
+class _MatchData {
+  const _MatchData({required this.view, required this.request, this.trainer});
 
-  final Trainer trainer;
+  final _View view;
+  final _MatchRequest request;
+  final Trainer? trainer;
+}
+
+class _MatchRequest {
+  const _MatchRequest({
+    required this.status,
+    required this.trainerId,
+    required this.goal,
+    required this.days,
+    required this.time,
+    required this.area,
+    required this.locationName,
+    required this.budgetMin,
+    required this.budgetMax,
+    required this.matchOutcome,
+    required this.matchReason,
+    required this.matchedAt,
+  });
+
+  factory _MatchRequest.fromJson(Map<String, dynamic> json) {
+    final location = json['training_locations'];
+
+    return _MatchRequest(
+      status: ConciergeStatus.normalise(json['status']),
+      trainerId: json['trainer_id']?.toString().trim() ?? '',
+      goal: json['goal']?.toString().trim() ?? '',
+      days: ConciergeCopy.days(json['preferred_days']),
+      time: json['preferred_time']?.toString().trim() ?? '',
+      area: json['preferred_area']?.toString().trim() ?? '',
+      locationName: location is Map ? location['name']?.toString().trim() : null,
+      budgetMin: GSWMoney.parse(json['budget_min']),
+      budgetMax: GSWMoney.parse(json['budget_max']),
+      matchOutcome: ConciergeStatus.normalise(json['match_outcome']),
+      matchReason: json['match_reason']?.toString().trim() ?? '',
+      matchedAt: GSWTime.parseToDubai(json['matched_at']),
+    );
+  }
+
+  final String status;
+  final String trainerId;
+  final String goal;
+  final List<String> days;
+  final String time;
+  final String area;
+  final String? locationName;
+  final double? budgetMin;
+  final double? budgetMax;
+  final String matchOutcome;
+  final String matchReason;
+  final DateTime? matchedAt;
+
+  /// Used only when the matcher left no reason. Built from what the customer
+  /// asked for, including where they want to train (gym, home or outdoors).
+  String fallbackReason({
+    required String firstName,
+    required Object? gender,
+    required bool aboveBudget,
+  }) {
+    final headline = ConciergeCopy.goalHeadline(goal);
+    final goalText = headline.isEmpty || headline == 'Your training goal'
+        ? 'You want help with your training'
+        : 'You want to ${headline[0].toLowerCase()}${headline.substring(1)}';
+
+    final schedule = ConciergeCopy.daysAndTimePhrase(days, time);
+    final place = ConciergeCopy.placePhrase(locationName, area);
+
+    final asked = [
+      goalText,
+      if (schedule.isNotEmpty) 'on $schedule',
+      if (place.isNotEmpty) place,
+    ].join(', ');
+
+    final pronoun = GSWPronoun.subject(gender);
+    final works = pronoun == 'they' ? 'work' : 'works';
+
+    if (aboveBudget) {
+      final budget = ConciergeCopy.budgetRange(budgetMin, budgetMax);
+      final inside = budget == null ? 'inside your budget' : 'inside $budget';
+
+      return 'Nobody $inside has the times and place you asked for right now. '
+          '$firstName does, and $pronoun $works with the same goal. '
+          'If the price does not work, we will keep looking.';
+    }
+
+    return '$asked. We think $firstName is the right fit for that.';
+  }
 }

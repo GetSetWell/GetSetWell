@@ -40,6 +40,29 @@ class ProfileRepository {
     return fullName.isNotEmpty && city.isNotEmpty;
   }
 
+  /// First name from the saved profile, or null when there is none.
+  Future<String?> fetchFirstName() async {
+    final customerId = await _getCustomerId();
+
+    if (customerId == null) {
+      return null;
+    }
+
+    final profile = await _client
+        .from('customer_profiles')
+        .select('full_name')
+        .eq('id', customerId)
+        .maybeSingle();
+
+    final fullName = profile?['full_name']?.toString().trim() ?? '';
+
+    if (fullName.isEmpty) {
+      return null;
+    }
+
+    return fullName.split(RegExp(r'\s+')).first;
+  }
+
   Future<void> saveBasicProfile({required String fullName, required String city}) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
 

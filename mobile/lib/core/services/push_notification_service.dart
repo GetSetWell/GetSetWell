@@ -122,6 +122,81 @@ class PushNotificationService {
     debugPrint('Foreground notification displayed');
   }
 
+  /// Set once the system prompt has been shown on Android in this app
+  /// launch, so the person is never asked repeatedly in one session.
+  static bool _androidPermissionRequestedThisLaunch = false;
+
+  /// Whether the system notification prompt should be shown now.
+  ///
+  /// On iOS this is only true while the person has never been asked. On
+  /// Android firebase_messaging reports `denied` before the person was ever
+  /// asked (Android 13+), so ask whenever notifications are not enabled, at
+  /// most once per app launch.
+  Future<bool> shouldRequestPermission() async {
+    if (!_supportsMobilePush) return false;
+
+    final current = await _messaging.getNotificationSettings();
+
+    if (Platform.isIOS) {
+      return current.authorizationStatus == AuthorizationStatus.notDetermined;
+    }
+
+    if (_androidPermissionRequestedThisLaunch) return false;
+    if (current.authorizationStatus == AuthorizationStatus.authorized) return false;
+
+    bool? enabled;
+    try {
+      enabled = await _localNotifications
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.areNotificationsEnabled();
+    } catch (error) {
+      debugPrint('Notification enabled check failed: $error');
+    }
+
+    return enabled != true;
+  }
+
+  /// Shows the system notification prompt and returns the resulting settings.
+  Future<NotificationSettings> requestPermission() {
+    if (!kIsWeb && Platform.isAndroid) {
+      _androidPermissionRequestedThisLaunch = true;
+    }
+
+    return _messaging.requestPermission(alert: true, badge: true, sound: true);
+  }
+
+  /// Asks for notification permission when [shouldRequestPermission] allows
+  /// it, so it is safe to call on every sign-in. Without this, iPhone and
+  /// Android 13+ users who skip Help me choose would never receive match,
+  /// booking or reminder notifications.
+  Future<void> requestPermissionIfNeeded() async {
+    if (!_supportsMobilePush) return;
+
+    try {
+      if (!await shouldRequestPermission()) return;
+
+      await requestPermission();
+    } catch (error) {
+      debugPrint('Notification permission request failed: $error');
+    }
+  }
+
+  /// On iOS, show notification banners while the app is in the foreground.
+  /// Android foreground banners are handled by [initializeForegroundNotifications].
+  Future<void> configureForegroundPresentation() async {
+    if (kIsWeb || !Platform.isIOS) return;
+
+    try {
+      await _messaging.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (error) {
+      debugPrint('Foreground presentation setup failed: $error');
+    }
+  }
+
   /// Register this device only for the Firebase user who started the request.
   Future<void> registerCurrentDevice() async {
     if (!_supportsMobilePush) return;

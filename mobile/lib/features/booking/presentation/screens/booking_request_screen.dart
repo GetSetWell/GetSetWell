@@ -1,403 +1,358 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:mobile/features/trainers/presentation/widgets/trainer_photo.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
+import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
 import 'package:mobile/features/booking/domain/models/booking_checkout_data.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Direct booking, Figma Story 5 (5.1 to 5.4) and 11.2e (booking again).
+///
+/// Four stable steps, numbered once each:
+/// 1 Session (where: trainer's gym or a place you choose, with price)
+/// 2 Location (Home / Gym / Outdoors and the area or address)
+/// 3 Time (Dubai time, 60 minute sessions)
+/// 4 Review and pay
 class BookingRequestScreen extends StatefulWidget {
   const BookingRequestScreen({
     super.key,
-
     required this.trainer,
-
     this.initialGoal,
-
     this.sourceConciergeRequestId,
-
     this.initialTrainingPlace,
-
     this.initialVenueChoice,
-
     this.initialLocationLabel,
-
     this.initialNotes,
-
     this.isRepeatBooking = false,
   });
 
   final Trainer trainer;
-
   final String? initialGoal;
-
   final String? sourceConciergeRequestId;
-
   final CustomerTrainingPlace? initialTrainingPlace;
-
   final BookingVenueChoice? initialVenueChoice;
-
   final String? initialLocationLabel;
-
   final String? initialNotes;
-
   final bool isRepeatBooking;
 
   @override
   State<BookingRequestScreen> createState() => _BookingRequestScreenState();
 }
 
-// =============================================================================
-
-// PUBLIC CHECKOUT DATA
-
-// =============================================================================
-
-// =============================================================================
-
-// STATE
-
-// =============================================================================
+enum _LoadState { loading, ready, signInRequired, failed }
 
 class _BookingRequestScreenState extends State<BookingRequestScreen> {
+  static const int _totalSteps = 4;
+  static const int _stepSession = 1;
+  static const int _stepLocation = 2;
+  static const int _stepTime = 3;
+  static const int _stepReview = 4;
+
+  static const Duration _sessionLength = Duration(hours: 1);
+  static const int _maxLocationLength = 150;
+  static const int _minHomeAddressLength = 8;
+
   final SupabaseClient _client = Supabase.instance.client;
 
-  final TextEditingController _preferredAreaController = TextEditingController();
-
+  final TextEditingController _areaController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
-  bool _isLoading = true;
+  _LoadState _loadState = _LoadState.loading;
 
-  int _currentStep = 1;
+  int _currentStep = _stepSession;
+
+  /// True when "Book again" skipped straight to the time step. The step
+  /// count is hidden then (11.2e), because the numbering would mislead.
+  bool _skippedToTime = false;
 
   CustomerTrainingPlace? _customerTrainingPlace;
-
   BookingVenueChoice _venueChoice = BookingVenueChoice.customerChoice;
 
+  /// Selected start, Dubai wall-clock time.
   DateTime? _selectedDate;
-
-  String? _selectedTime;
+  DateTime? _selectedStart;
 
   BookingPaymentMethod _paymentMethod = BookingPaymentMethod.card;
 
-  double? _gymPrice;
-
+  double? _standardRateFresh;
+  double? _gymRate;
   String? _gymLocationLabel;
 
+  /// Open start times, Dubai wall-clock time.
   List<DateTime> _availabilityStarts = const [];
 
-  bool _availabilityLoadFailed = false;
+  bool _isOpeningPayment = false;
+  bool _showPriceChangedNotice = false;
+
+  /// Area typed for a place the person chooses, kept while the trainer's gym
+  /// is selected so switching back restores it.
+  String _customerArea = '';
 
   Trainer get trainer => widget.trainer;
 
-  // =============================================================================
+  Object? get _gender => trainer.gender;
 
-  // BASIC TRAINER DATA
+  // ===========================================================================
+  // TRAINER DATA
+  // ===========================================================================
 
-  // =============================================================================
+  String get _firstName => BookingCopy.firstName(trainer.fullName);
 
-  String get _trainerFirstName {
-    final name = trainer.fullName.trim();
-
-    if (name.isEmpty) {
-      return 'trainer';
-    }
-
-    return name.split(RegExp(r'\s+')).first;
-  }
-
-  String get _trainerService {
+  String get _service {
     final value = trainer.primaryService?.trim();
 
-    if (value == null || value.isEmpty) {
-      return 'training';
-    }
+    if (value == null || value.isEmpty) return 'Personal training';
 
-    return value;
+    return GSWPronoun.capitalise(value);
   }
 
-  double get _standardPrice {
-    return trainer.pricePerSession?.toDouble() ?? 0;
-  }
+  String get _subtitle => '${trainer.fullName}, ${_service.toLowerCase()}';
 
-  bool get _hasPrivateGym {
-    return _gymPrice != null &&
-        _gymPrice! > 0 &&
-        _gymLocationLabel != null &&
-        _gymLocationLabel!.trim().isNotEmpty;
-  }
+  double get _standardRate =>
+      _roundToFils(_standardRateFresh ?? trainer.pricePerSession?.toDouble() ?? 0);
 
-  // =============================================================================
+  bool get _hasPrivateGym =>
+      _gymRate != null &&
+      _gymRate! > 0 &&
+      _gymLocationLabel != null &&
+      _gymLocationLabel!.trim().isNotEmpty;
 
-  // DYNAMIC FLOW
+  bool get _atTrainerGym =>
+      _venueChoice == BookingVenueChoice.trainerPrivateGym && _hasPrivateGym;
 
-  // =============================================================================
+  // ===========================================================================
+  // PRICE (all maths in fils through GSWMoney)
+  // ===========================================================================
 
-  int get _totalSteps {
-    return _hasPrivateGym ? 4 : 3;
-  }
+  static double _roundToFils(num value) => GSWMoney.fromFils(GSWMoney.toFils(value));
 
-  bool get _isVenueChoiceStep {
-    return _hasPrivateGym && _currentStep == 2;
-  }
+  double get _sessionRate => _atTrainerGym ? _roundToFils(_gymRate!) : _standardRate;
 
-  bool get _isTimeStep {
-    if (_hasPrivateGym) {
-      return _currentStep == 3;
-    }
+  double get _serviceFee => GSWMoney.serviceFee(_sessionRate);
 
-    return _currentStep == 2;
-  }
+  double get _total => GSWMoney.totalWithFee(_sessionRate);
 
-  bool get _isReviewStep {
-    return _currentStep == _totalSteps;
-  }
-
-  // =============================================================================
-
+  // ===========================================================================
   // LOCATION
+  // ===========================================================================
 
-  // =============================================================================
+  String get _finalLocationLabel =>
+      _atTrainerGym ? _gymLocationLabel!.trim() : _areaController.text.trim();
 
-  String get _customerLocationLabel {
-    return _preferredAreaController.text.trim();
+  CustomerTrainingPlace? get _effectiveTrainingPlace =>
+      _atTrainerGym ? CustomerTrainingPlace.gym : _customerTrainingPlace;
+
+  /// "at his gym", "at your place", "at your gym", "outdoors".
+  String get _sessionPlacePhrase {
+    if (_atTrainerGym) return 'at ${GSWPronoun.possessive(_gender)} gym';
+
+    return _customerPlacePhrase;
   }
 
-  String get _finalLocationLabel {
-    if (_venueChoice == BookingVenueChoice.trainerPrivateGym && _hasPrivateGym) {
-      return _gymLocationLabel!;
-    }
-
-    return _customerLocationLabel;
-  }
-
-  String get _customerTrainingPlaceLabel {
+  String get _customerPlacePhrase {
     switch (_customerTrainingPlace) {
       case CustomerTrainingPlace.gym:
-        return 'Gym';
-
-      case CustomerTrainingPlace.home:
-        return 'Home';
-
-      case CustomerTrainingPlace.outdoors:
-        return 'Outdoors';
-
-      case null:
-        return '';
-    }
-  }
-
-  String get _customerVenueDescription {
-    switch (_customerTrainingPlace) {
-      case CustomerTrainingPlace.gym:
-        return 'your preferred gym';
-
-      case CustomerTrainingPlace.home:
-        return 'your place';
-
+        return 'at your gym';
       case CustomerTrainingPlace.outdoors:
         return 'outdoors';
-
+      case CustomerTrainingPlace.home:
       case null:
-        return '';
+        return 'at your place';
     }
   }
 
-  // =============================================================================
+  String get _whereLabel => BookingCopy.whereLabel(
+        venueChoice: _atTrainerGym
+            ? BookingVenueChoice.trainerPrivateGym
+            : BookingVenueChoice.customerChoice,
+        customerTrainingPlace: _effectiveTrainingPlace ?? CustomerTrainingPlace.gym,
+        locationLabel: _finalLocationLabel,
+        trainerGender: _gender,
+      );
 
-  // PRICE
+  String? get _locationError {
+    final value = _areaController.text.trim();
 
-  // =============================================================================
-
-  double get _activeSessionRate {
-    if (_venueChoice == BookingVenueChoice.trainerPrivateGym && _hasPrivateGym) {
-      return _gymPrice!;
+    if (value.length > _maxLocationLength) {
+      return 'Keep this under $_maxLocationLength characters.';
     }
 
-    return _standardPrice;
+    return null;
   }
 
-  double get _serviceFee {
-    return _activeSessionRate * 0.05;
-  }
+  // ===========================================================================
+  // DATES (Dubai wall-clock time from GSWTime)
+  // ===========================================================================
 
-  double get _total {
-    return _activeSessionRate + _serviceFee;
-  }
-
-  // =============================================================================
-
-  // DATE
-
-  // =============================================================================
-
-  List<DateTime> get _availableDates {
-    final nowDubai = _toDubai(DateTime.now());
-
-    final today = DateTime(nowDubai.year, nowDubai.month, nowDubai.day);
+  List<DateTime> get _dates {
+    final now = GSWTime.nowDubai();
+    final today = DateTime.utc(now.year, now.month, now.day);
 
     return List.generate(7, (index) => today.add(Duration(days: index)));
   }
 
-  List<String> _timeSlotsForDate(DateTime date) {
-    final starts = _availabilityStarts.where((value) => _sameDate(value, date)).toList()..sort();
+  List<DateTime> _startsOn(DateTime date) =>
+      _availabilityStarts.where((value) => GSWTime.isSameDay(value, date)).toList()..sort();
 
-    return starts.map(_timeLabel).toList();
-  }
+  bool _dateHasAvailability(DateTime date) =>
+      _availabilityStarts.any((value) => GSWTime.isSameDay(value, date));
 
-  bool _dateHasAvailability(DateTime date) {
-    return _availabilityStarts.any((value) => _sameDate(value, date));
-  }
-
-  // =============================================================================
-
+  // ===========================================================================
   // VALIDATION
-
-  // =============================================================================
+  // ===========================================================================
 
   bool get _stepComplete {
-    // STEP 1:
+    switch (_currentStep) {
+      case _stepSession:
+        return _sessionRate > 0;
 
-    // customer must pick location type AND enter preferred area.
+      case _stepLocation:
+        if (_atTrainerGym) return true;
+        if (_customerTrainingPlace == null) return false;
+        final area = _areaController.text.trim();
+        if (area.isEmpty || _locationError != null) return false;
+        if (_customerTrainingPlace == CustomerTrainingPlace.home &&
+            area.length < _minHomeAddressLength) {
+          return false;
+        }
+        return true;
 
-    if (_currentStep == 1) {
-      return _customerTrainingPlace != null && _preferredAreaController.text.trim().isNotEmpty;
+      case _stepTime:
+        return _selectedStart != null;
+
+      default:
+        return true;
     }
-
-    // Optional private-gym comparison.
-
-    if (_isVenueChoiceStep) {
-      return true;
-    }
-
-    // Time.
-
-    if (_isTimeStep) {
-      return _selectedDate != null && _selectedTime != null;
-    }
-
-    // Review.
-
-    if (_isReviewStep) {
-      return true;
-    }
-
-    return false;
   }
 
-  // =============================================================================
-
+  // ===========================================================================
   // LIFECYCLE
-
-  // =============================================================================
+  // ===========================================================================
 
   @override
   void initState() {
     super.initState();
 
     _customerTrainingPlace = widget.initialTrainingPlace;
-
     _venueChoice = widget.initialVenueChoice ?? BookingVenueChoice.customerChoice;
 
-    if (widget.initialLocationLabel?.trim().isNotEmpty == true) {
-      _preferredAreaController.text = widget.initialLocationLabel!.trim();
+    final initialLocation = widget.initialLocationLabel?.trim() ?? '';
+
+    if (_venueChoice == BookingVenueChoice.customerChoice && initialLocation.isNotEmpty) {
+      _areaController.text = initialLocation;
+      _customerArea = initialLocation;
     }
 
-    if (widget.initialNotes?.trim().isNotEmpty == true) {
-      _notesController.text = widget.initialNotes!.trim();
+    final initialNotes = widget.initialNotes?.trim() ?? '';
+
+    if (initialNotes.isNotEmpty) {
+      _notesController.text =
+          initialNotes.length > 250 ? initialNotes.substring(0, 250) : initialNotes;
     }
 
-    _loadTrainerBookingData();
+    _loadTrainerBookingData(isInitialLoad: true);
   }
 
   @override
   void dispose() {
-    _preferredAreaController.dispose();
-
+    _areaController.dispose();
     _notesController.dispose();
-
     super.dispose();
   }
 
-  // =============================================================================
-
+  // ===========================================================================
   // BACKEND
+  // ===========================================================================
 
-  // =============================================================================
+  Future<void> _loadTrainerBookingData({bool isInitialLoad = false}) async {
+    if (_loadState != _LoadState.loading) {
+      setState(() {
+        _loadState = _LoadState.loading;
+      });
+    }
 
-  Future<void> _loadTrainerBookingData() async {
     try {
       final results = await Future.wait<dynamic>([
         _client
             .from('trainers')
-            .select('''
-          gym_price_per_session,
-          gym_location_label
-          ''')
+            .select('price_per_session, gym_price_per_session, gym_location_label')
             .eq('id', trainer.id)
             .maybeSingle(),
         _client.rpc('get_trainer_booking_availability', params: {'p_trainer_id': trainer.id}),
       ]);
 
       final trainerRow = results[0] as Map<String, dynamic>?;
-
       final availabilityResult = results[1];
 
-      final rawGymPrice = trainerRow?['gym_price_per_session'];
-
-      final gymPrice = rawGymPrice is num
-          ? rawGymPrice.toDouble()
-          : double.tryParse(rawGymPrice?.toString() ?? '');
-
+      final standardRate = GSWMoney.parse(trainerRow?['price_per_session']);
+      final gymRate = GSWMoney.parse(trainerRow?['gym_price_per_session']);
       final gymLocation = trainerRow?['gym_location_label']?.toString().trim();
 
-      final availabilityStarts = <DateTime>[];
+      final starts = <DateTime>[];
 
       if (availabilityResult is List) {
-        for (final rawRow in availabilityResult) {
-          if (rawRow is! Map) continue;
-
-          final startsAt = DateTime.tryParse(rawRow['starts_at']?.toString() ?? '');
-
-          if (startsAt == null) continue;
-
-          availabilityStarts.add(_toDubai(startsAt));
+        for (final row in availabilityResult) {
+          if (row is! Map) continue;
+          final startsAt = GSWTime.parseToDubai(row['starts_at']);
+          if (startsAt != null) starts.add(startsAt);
         }
       }
 
-      availabilityStarts.sort();
+      starts.sort();
 
       if (!mounted) return;
 
       setState(() {
-        if (gymPrice != null && gymPrice > 0 && gymLocation != null && gymLocation.isNotEmpty) {
-          _gymPrice = gymPrice;
+        if (standardRate != null && standardRate > 0) {
+          _standardRateFresh = standardRate;
+        }
 
+        if (gymRate != null && gymRate > 0 && gymLocation != null && gymLocation.isNotEmpty) {
+          _gymRate = gymRate;
           _gymLocationLabel = gymLocation;
         } else {
-          _gymPrice = null;
-
+          _gymRate = null;
           _gymLocationLabel = null;
         }
 
-        _availabilityStarts = availabilityStarts;
-
-        _availabilityLoadFailed = false;
-
-        final hasReusableLocation =
-            _customerTrainingPlace != null && _preferredAreaController.text.trim().isNotEmpty;
-
-        if (widget.isRepeatBooking && hasReusableLocation) {
-          _currentStep = _hasPrivateGym ? 3 : 2;
+        // A repeat booking may carry the trainer's gym from last time. If the
+        // gym option no longer loads, fall back to a place the person chooses.
+        if (!_hasPrivateGym) {
+          _venueChoice = BookingVenueChoice.customerChoice;
         }
 
-        _isLoading = false;
+        _availabilityStarts = starts;
+
+        // Drop a selection that is no longer offered.
+        if (_selectedStart != null && !starts.contains(_selectedStart)) {
+          _selectedStart = null;
+        }
+
+        if (_selectedDate == null || !_dateHasAvailability(_selectedDate!)) {
+          _selectedDate = _firstAvailableDate();
+        }
+
+        if (isInitialLoad && widget.isRepeatBooking) {
+          final canReuseLocation = _atTrainerGym ||
+              (_customerTrainingPlace != null && _areaController.text.trim().isNotEmpty);
+
+          if (canReuseLocation) {
+            _currentStep = _stepTime;
+            _skippedToTime = true;
+          }
+        }
+
+        _loadState = _LoadState.ready;
       });
     } catch (error) {
       debugPrint('Booking trainer data load failed: $error');
@@ -405,47 +360,44 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
       if (!mounted) return;
 
       setState(() {
-        _gymPrice = null;
-
-        _gymLocationLabel = null;
-
-        _availabilityStarts = const [];
-
-        _availabilityLoadFailed = true;
-
-        _isLoading = false;
+        _loadState = _isAuthRequired(error) ? _LoadState.signInRequired : _LoadState.failed;
       });
     }
   }
 
-  DateTime _toDubai(DateTime value) {
-    return value.toUtc().add(const Duration(hours: 4));
+  bool _isAuthRequired(Object error) {
+    if (error is PostgrestException) {
+      return error.message.contains('AUTH_REQUIRED') ||
+          (error.details?.toString().contains('AUTH_REQUIRED') ?? false);
+    }
+
+    return error.toString().contains('AUTH_REQUIRED');
   }
 
-  String _timeLabel(DateTime value) {
-    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  DateTime? _firstAvailableDate() {
+    for (final date in _dates) {
+      if (_dateHasAvailability(date)) return date;
+    }
 
-    final minute = value.minute.toString().padLeft(2, '0');
-
-    final period = value.hour >= 12 ? 'PM' : 'AM';
-
-    return '$hour:$minute $period';
+    return null;
   }
 
-  // =============================================================================
+  Future<void> _signIn() async {
+    await context.push(GSWRoutes.userAuth, extra: const AuthFlowIntent.returnToCaller());
 
+    if (!mounted) return;
+
+    _loadTrainerBookingData(isInitialLoad: true);
+  }
+
+  // ===========================================================================
   // NAVIGATION
-
-  // =============================================================================
+  // ===========================================================================
 
   void _goNext() {
-    if (!_stepComplete) {
-      return;
-    }
+    if (!_stepComplete || _currentStep >= _totalSteps) return;
 
-    if (_currentStep >= _totalSteps) {
-      return;
-    }
+    FocusScope.of(context).unfocus();
 
     setState(() {
       _currentStep++;
@@ -453,434 +405,393 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   }
 
   void _goBack() {
-    if (_currentStep <= 1) {
+    if (_currentStep <= _stepSession) {
+      _closeFlow();
       return;
     }
 
+    FocusScope.of(context).unfocus();
+
     setState(() {
       _currentStep--;
+      if (_currentStep < _stepTime) _skippedToTime = false;
     });
   }
 
   void _closeFlow() {
     if (context.canPop()) {
       context.pop();
+    } else {
+      context.go(GSWRoutes.home);
     }
   }
 
-  // =============================================================================
-
-  // USER CHOICES
-
-  // =============================================================================
-
-  void _selectCustomerTrainingPlace(CustomerTrainingPlace place) {
+  void _editBooking() {
     setState(() {
-      _customerTrainingPlace = place;
-
-      // If the user changes their original
-
-      // training preference, default the later
-
-      // venue decision back to that choice.
-
-      _venueChoice = BookingVenueChoice.customerChoice;
+      _currentStep = _stepSession;
+      _skippedToTime = false;
     });
   }
 
-  void _selectVenueChoice(BookingVenueChoice choice) {
+  // ===========================================================================
+  // CHOICES
+  // ===========================================================================
+
+  void _selectVenue(BookingVenueChoice choice) {
     setState(() {
+      if (choice == _venueChoice) return;
+
+      if (choice == BookingVenueChoice.trainerPrivateGym) {
+        _customerArea = _areaController.text;
+      } else {
+        _areaController.text = _customerArea;
+      }
+
       _venueChoice = choice;
     });
   }
 
-  DateTime _combineDateAndTime(DateTime date, String timeLabel) {
-    final match = RegExp(
-      r'^(\d{1,2}):(\d{2})\s+(AM|PM)$',
-    ).firstMatch(timeLabel.trim().toUpperCase());
+  void _selectTrainingPlace(CustomerTrainingPlace place) {
+    setState(() {
+      if (_customerTrainingPlace != place && place == CustomerTrainingPlace.home) {
+        // A home session needs a real address, not an area.
+        if (_customerTrainingPlace != null) _areaController.clear();
+      }
 
-    if (match == null) {
-      throw FormatException('Invalid booking time: $timeLabel');
-    }
-
-    var hour = int.parse(match.group(1)!);
-
-    final minute = int.parse(match.group(2)!);
-
-    final period = match.group(3)!;
-
-    if (period == 'PM' && hour != 12) {
-      hour += 12;
-    }
-
-    if (period == 'AM' && hour == 12) {
-      hour = 0;
-    }
-
-    return DateTime(date.year, date.month, date.day, hour, minute);
+      _customerTrainingPlace = place;
+    });
   }
 
-  // =============================================================================
-
+  // ===========================================================================
   // PAYMENT
+  // ===========================================================================
 
-  // =============================================================================
+  Future<void> _continueToPayment() async {
+    if (_isOpeningPayment) return;
 
-  void _continueToPayment() {
-    if (_selectedDate == null ||
-        _selectedTime == null ||
-        _customerTrainingPlace == null ||
-        _finalLocationLabel.trim().isEmpty) {
+    final start = _selectedStart;
+    final place = _effectiveTrainingPlace;
+
+    if (start == null || place == null || _finalLocationLabel.isEmpty || _sessionRate <= 0) {
       return;
     }
 
-    final scheduledAt = _combineDateAndTime(_selectedDate!, _selectedTime!);
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _isOpeningPayment = true;
+      _showPriceChangedNotice = false;
+    });
+
+    final notes = _notesController.text.trim();
 
     final checkoutData = BookingCheckoutData(
       trainer: trainer,
-
-      customerTrainingPlace: _customerTrainingPlace!,
-
-      venueChoice: _venueChoice,
-
+      customerTrainingPlace: place,
+      venueChoice:
+          _atTrainerGym ? BookingVenueChoice.trainerPrivateGym : BookingVenueChoice.customerChoice,
       locationLabel: _finalLocationLabel,
-
-      sessionRate: _activeSessionRate,
-
+      sessionRate: _sessionRate,
       serviceFee: _serviceFee,
-
       total: _total,
-
-      scheduledAt: scheduledAt,
-
+      scheduledAt: start,
       paymentMethod: _paymentMethod,
-
-      goal: widget.initialGoal,
-
-      notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-
+      goal: widget.initialGoal?.trim().isEmpty == true ? null : widget.initialGoal?.trim(),
+      notes: notes.isEmpty ? null : notes,
       sourceConciergeRequestId: widget.sourceConciergeRequestId,
+      availableStarts: _availabilityStarts,
+      isRepeatBooking: widget.isRepeatBooking,
     );
 
-    context.push(GSWRoutes.bookingPayment, extra: checkoutData);
+    final outcome = await context.push<BookingPaymentOutcome>(
+      GSWRoutes.bookingPayment,
+      extra: checkoutData,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isOpeningPayment = false;
+    });
+
+    switch (outcome) {
+      case BookingPaymentOutcome.priceChanged:
+        await _loadTrainerBookingData();
+        if (!mounted) return;
+        setState(() {
+          _currentStep = _stepReview;
+          _showPriceChangedNotice = true;
+        });
+
+      case BookingPaymentOutcome.pickAnotherTime:
+        setState(() {
+          _selectedStart = null;
+          _currentStep = _stepTime;
+        });
+        await _loadTrainerBookingData();
+
+      case BookingPaymentOutcome.changePaymentMethod:
+      case null:
+        break;
+    }
   }
 
-  // =============================================================================
-
+  // ===========================================================================
   // BUILD
-
-  // =============================================================================
+  // ===========================================================================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
-
       body: SafeArea(
         bottom: false,
-
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-
-              child: _buildProgressHeader(),
+        child: switch (_loadState) {
+          _LoadState.loading => const Center(
+              child: CircularProgressIndicator(color: GSWColors.primary),
             ),
-
-            const SizedBox(height: 24),
-
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: GSWColors.primary))
-                  : _buildCurrentStep(),
-            ),
-          ],
-        ),
+          _LoadState.signInRequired => _buildSignInState(),
+          _LoadState.failed => _buildLoadFailedState(),
+          _LoadState.ready => _buildCurrentStep(),
+        },
       ),
-
-      bottomNavigationBar: _isLoading ? null : _buildBottomActions(),
+      bottomNavigationBar: _loadState == _LoadState.ready ? _buildBottomBar() : null,
     );
   }
 
   Widget _buildCurrentStep() {
-    if (_currentStep == 1) {
-      return _buildLocationPreferenceStep();
+    switch (_currentStep) {
+      case _stepSession:
+        return _buildSessionStep();
+      case _stepLocation:
+        return _buildLocationStep();
+      case _stepTime:
+        return _buildTimeStep();
+      default:
+        return _buildReviewStep();
     }
-
-    if (_isVenueChoiceStep) {
-      return _buildPrivateGymChoiceStep();
-    }
-
-    if (_isTimeStep) {
-      return _buildTimeStep();
-    }
-
-    return _buildReviewStep();
   }
 
-  // =============================================================================
+  // ===========================================================================
+  // LOAD STATES
+  // ===========================================================================
 
-  // PROGRESS HEADER
-
-  // =============================================================================
-
-  Widget _buildProgressHeader() {
-    return Row(
-      children: [
-        Material(
-          color: Colors.transparent,
-
-          child: InkWell(
-            onTap: _currentStep == 1 ? _closeFlow : _goBack,
-
-            customBorder: const CircleBorder(),
-
-            child: Container(
-              width: 46,
-
-              height: 46,
-
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-
-                border: Border.all(color: GSWColors.borderSecondary),
-              ),
-
-              alignment: Alignment.center,
-
-              child: _currentStep == 1
-                  ? SvgPicture.asset(
-                      GSWIcons.close,
-
-                      width: 14,
-
-                      height: 14,
-
-                      colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
-                    )
-                  : const Icon(Icons.chevron_left_rounded, size: 30, color: GSWColors.primary),
-            ),
-          ),
-        ),
-
-        const SizedBox(width: 16),
-
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-
-            child: LinearProgressIndicator(
-              value: _currentStep / _totalSteps,
-
-              minHeight: 8,
-
-              backgroundColor: GSWColors.surfaceInteractive,
-
-              valueColor: const AlwaysStoppedAnimation<Color>(GSWColors.primary),
-            ),
-          ),
-        ),
-
-        const SizedBox(width: 16),
-
-        Text(
-          '$_currentStep of $_totalSteps',
-
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-        ),
-      ],
+  Widget _buildSignInState() {
+    return _buildMessageState(
+      title: 'Sign in to book',
+      body: 'Sign in with your mobile number to see $_firstName’s open times and book a session.',
+      primaryLabel: 'Sign in',
+      onPrimary: _signIn,
     );
   }
 
-  // =============================================================================
+  Widget _buildLoadFailedState() {
+    return _buildMessageState(
+      title: 'We couldn’t load $_firstName’s times',
+      body: 'Check your connection and try again.',
+      primaryLabel: 'Try again',
+      onPrimary: () => _loadTrainerBookingData(isInitialLoad: true),
+    );
+  }
 
-  // STEP 1 — CUSTOMER LOCATION PREFERENCE
-
-  // =============================================================================
-
-  Widget _buildLocationPreferenceStep() {
-    return _stepScroll(
+  Widget _buildMessageState({
+    required String title,
+    required String body,
+    required String primaryLabel,
+    required VoidCallback onPrimary,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildPageHeading(
-          title: 'Confirm where you are training',
-
-          subtitle: '${trainer.fullName}, $_trainerService',
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Align(alignment: Alignment.centerLeft, child: _buildCloseButton()),
         ),
-
-        const SizedBox(height: 24),
-
-        Text('Where', style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
-
-        const SizedBox(height: 8),
-
-        Row(
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: GSWTextStyles.titleLarge.copyWith(
+                    color: GSWColors.textPrimary,
+                    height: 30 / 24,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  body,
+                  textAlign: TextAlign.center,
+                  style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+        ),
+        _bottomBarShell(
           children: [
-            Expanded(
-              child: _buildChoiceChip(
-                label: 'Gym',
-
-                selected: _customerTrainingPlace == CustomerTrainingPlace.gym,
-
-                onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.gym),
-              ),
+            GSWButton(
+              label: primaryLabel,
+              onPressed: onPrimary,
+              variant: GSWButtonVariant.primary,
+              size: GSWButtonSize.large,
             ),
-
-            const SizedBox(width: 8),
-
-            Expanded(
-              child: _buildChoiceChip(
-                label: 'Home',
-
-                selected: _customerTrainingPlace == CustomerTrainingPlace.home,
-
-                onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.home),
-              ),
-            ),
-
-            const SizedBox(width: 8),
-
-            Expanded(
-              child: _buildChoiceChip(
-                label: 'Outdoors',
-
-                selected: _customerTrainingPlace == CustomerTrainingPlace.outdoors,
-
-                onTap: () => _selectCustomerTrainingPlace(CustomerTrainingPlace.outdoors),
-              ),
+            GSWButton(
+              label: 'Back to $_firstName',
+              onPressed: _closeFlow,
+              variant: GSWButtonVariant.secondary,
+              size: GSWButtonSize.large,
             ),
           ],
         ),
-
-        const SizedBox(height: 28),
-
-        Text(
-          'Preferred area',
-
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-        ),
-
-        const SizedBox(height: 8),
-
-        GSWTextField(
-          size: GSWTextFieldSize.large,
-
-          controller: _preferredAreaController,
-
-          enabled: _customerTrainingPlace != null,
-
-          hintText: _customerTrainingPlace == null ? 'Choose where first' : _areaHint,
-
-          textInputAction: TextInputAction.done,
-
-          onChanged: (_) {
-            setState(() {});
-          },
-
-          onComplete: (_) {
-            if (_stepComplete) {
-              _goNext();
-            }
-          },
-        ),
-
-        const SizedBox(height: 10),
-
-        Text(
-          _areaHelpingText,
-
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.4),
-        ),
       ],
     );
   }
 
-  String get _areaHint {
-    switch (_customerTrainingPlace) {
-      case CustomerTrainingPlace.gym:
-        return 'e.g. Dubai Marina';
+  // ===========================================================================
+  // HEADER (close or back, progress, step count)
+  // ===========================================================================
 
-      case CustomerTrainingPlace.home:
-        return 'e.g. Marina and JLT';
+  Widget _buildHeader() {
+    final isReview = _currentStep == _stepReview;
+    final showProgress = !_skippedToTime;
 
-      case CustomerTrainingPlace.outdoors:
-        return 'e.g. Dubai Marina';
-
-      case null:
-        return 'Preferred area';
-    }
-  }
-
-  String get _areaHelpingText {
-    switch (_customerTrainingPlace) {
-      case CustomerTrainingPlace.gym:
-        return 'Tell us the area where you would prefer to train at a gym.';
-
-      case CustomerTrainingPlace.home:
-        return 'Tell us the area where your home is located.';
-
-      case CustomerTrainingPlace.outdoors:
-        return 'Tell us the area where you would prefer to train outdoors.';
-
-      case null:
-        return 'Choose where you would like to train first.';
-    }
-  }
-
-  // =============================================================================
-
-  // OPTIONAL STEP — TRAINER PRIVATE GYM
-
-  // =============================================================================
-
-  Widget _buildPrivateGymChoiceStep() {
-    return _stepScroll(
+    return Row(
       children: [
-        _buildPageHeading(
-          title: 'How would you like to train?',
-
-          subtitle: '${trainer.fullName}, $_trainerService',
+        isReview ? _buildBackButton() : _buildCloseButton(),
+        const SizedBox(width: 16),
+        Expanded(
+          child: showProgress
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(GSWRadius.full),
+                  child: Container(
+                    height: 8,
+                    color: GSWColors.surfaceInteractive,
+                    child: Row(
+                      children: [
+                        for (var step = 1; step <= _totalSteps; step++)
+                          Expanded(
+                            child: Container(
+                              height: 8,
+                              color: step <= _currentStep
+                                  ? GSWColors.primary
+                                  : GSWColors.surfaceInteractive,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink(),
         ),
-
-        if (widget.initialGoal?.trim().isNotEmpty == true) ...[
-          const SizedBox(height: 28),
-
+        if (showProgress) ...[
+          const SizedBox(width: 16),
           Text(
-            'For: ${widget.initialGoal!.trim()}',
-
-            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
+            '$_currentStep of $_totalSteps',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
           ),
         ],
+      ],
+    );
+  }
 
-        const SizedBox(height: 28),
-
-        _buildVenueCard(
-          choice: BookingVenueChoice.trainerPrivateGym,
-
-          title: '60 minutes at his gym',
-
-          location: _gymLocationLabel!,
-
-          price: _gymPrice!,
+  Widget _buildCloseButton() {
+    return Semantics(
+      button: true,
+      label: 'Close booking',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _closeFlow,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: GSWColors.backgroundOverlay,
+              border: Border.all(color: GSWColors.borderSecondary),
+            ),
+            child: SvgPicture.asset(
+              GSWIcons.close,
+              width: 12,
+              height: 12,
+              colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+            ),
+          ),
         ),
+      ),
+    );
+  }
 
-        const SizedBox(height: 18),
+  Widget _buildBackButton() {
+    return Semantics(
+      button: true,
+      label: 'Back',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _goBack,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: GSWColors.borderSecondary),
+            ),
+            child: SvgPicture.asset(
+              GSWIcons.arrowheadLeft,
+              width: 30,
+              height: 30,
+              colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
+  // ===========================================================================
+  // STEP 1, SESSION (5.1)
+  // ===========================================================================
+
+  Widget _buildSessionStep() {
+    final goal = widget.initialGoal?.trim() ?? '';
+
+    final customerArea = _venueChoice == BookingVenueChoice.customerChoice
+        ? _areaController.text.trim()
+        : _customerArea.trim();
+
+    return _stepScroll(
+      children: [
+        _buildHeading(title: 'How would you like to train?', subtitle: _subtitle),
+        if (goal.isNotEmpty)
+          Text(
+            'For: $goal',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+          ),
+        if (_hasPrivateGym)
+          _buildVenueCard(
+            choice: BookingVenueChoice.trainerPrivateGym,
+            title: '60 minutes at ${GSWPronoun.possessive(_gender)} gym',
+            location: _gymLocationLabel!,
+            price: _roundToFils(_gymRate!),
+          ),
         _buildVenueCard(
           choice: BookingVenueChoice.customerChoice,
-
-          title: '60 minutes $_customerVenueDescription',
-
-          location: _customerLocationLabel,
-
-          price: _standardPrice,
+          title: '60 minutes $_customerPlacePhrase',
+          location: customerArea.isEmpty ? 'Home, your gym or outdoors' : customerArea,
+          price: _standardRate,
         ),
-
-        const SizedBox(height: 26),
-
         Text(
           'Prices are the session rate. A 5% service fee is added at checkout, and the total is shown before you pay.',
-
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
         ),
       ],
     );
@@ -888,527 +799,662 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
   Widget _buildVenueCard({
     required BookingVenueChoice choice,
-
     required String title,
-
     required String location,
-
     required double price,
   }) {
-    final selected = _venueChoice == choice;
+    final selected = _venueChoice == choice || (!_hasPrivateGym && choice == BookingVenueChoice.customerChoice);
 
-    return Material(
-      color: Colors.transparent,
-
-      child: InkWell(
-        onTap: () => _selectVenueChoice(choice),
-
-        borderRadius: BorderRadius.circular(16),
-
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-
-          width: double.infinity,
-
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-
-          decoration: BoxDecoration(
-            color: GSWColors.surfacePrimary,
-
-            borderRadius: BorderRadius.circular(16),
-
-            border: Border.all(
-              width: selected ? 2 : 1,
-
-              color: selected ? GSWColors.primary : Colors.transparent,
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _selectVenue(choice),
+          borderRadius: BorderRadius.circular(GSWRadius.control),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: GSWColors.surfacePrimary,
+              borderRadius: BorderRadius.circular(GSWRadius.control),
+              border: Border.all(
+                width: 1.5,
+                color: selected ? GSWColors.primary : Colors.transparent,
+              ),
             ),
-          ),
-
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-
-                  children: [
-                    Text(
-                      title,
-
-                      style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    Text(
-                      location,
-
-                      style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
-                    ),
-                  ],
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GSWTextStyles.labelLarge.copyWith(
+                          color: GSWColors.textPrimary,
+                          height: 22 / 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        location,
+                        style: GSWTextStyles.bodySmall.copyWith(
+                          color: GSWColors.textSecondary,
+                          fontSize: 13,
+                          height: 18 / 13,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-
-              const SizedBox(width: 12),
-
-              Text(
-                'AED $price',
-
-                style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.primary),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Text(
+                  GSWMoney.aed(price),
+                  style: GSWTextStyles.titleExtraSmall.copyWith(
+                    color: GSWColors.textAccent,
+                    fontWeight: FontWeight.w600,
+                    height: 22 / 18,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // =============================================================================
+  // ===========================================================================
+  // STEP 2, LOCATION (5.2)
+  // ===========================================================================
 
-  // TIME
-
-  // =============================================================================
-
-  Widget _buildTimeStep() {
-    final selectedDateSlots = _selectedDate == null
-        ? const <String>[]
-        : _timeSlotsForDate(_selectedDate!);
+  Widget _buildLocationStep() {
+    final atGym = _atTrainerGym;
+    final place = _effectiveTrainingPlace;
+    final isHome = !atGym && place == CustomerTrainingPlace.home;
 
     return _stepScroll(
       children: [
-        _buildPageHeading(title: 'Pick a time', subtitle: '${trainer.fullName}, $_trainerService'),
-
-        const SizedBox(height: 24),
-
-        Text(
-          '60 minutes $_finalTrainingDescription, $_finalLocationLabel',
-
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-        ),
-
-        const SizedBox(height: 24),
-
-        SizedBox(
-          height: 60,
-
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-
-            physics: const ClampingScrollPhysics(),
-
-            itemCount: _availableDates.length,
-
-            separatorBuilder: (_, _) => const SizedBox(width: 8),
-
-            itemBuilder: (context, index) {
-              return _buildDateCard(_availableDates[index]);
-            },
-          ),
-        ),
-
-        const SizedBox(height: 24),
-
-        if (_availabilityLoadFailed) ...[
-          Text(
-            'We could not load ${trainer.fullName}’s availability. Please go back and try again.',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-        ] else if (_availabilityStarts.isEmpty) ...[
-          Text(
-            '${trainer.fullName} has no available times in the next 7 days.',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-        ] else if (_selectedDate != null) ...[
-          Text(
-            _fullDate(_selectedDate!),
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-
-          const SizedBox(height: 24),
-
-          if (selectedDateSlots.isNotEmpty)
+        _buildHeading(title: 'Confirm where you are training'),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Where',
+              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final time in selectedDateSlots)
-                  SizedBox(
-                    width: (MediaQuery.sizeOf(context).width - 48) / 3,
-                    child: _buildTimeCard(time),
+                for (final option in const [
+                  CustomerTrainingPlace.home,
+                  CustomerTrainingPlace.gym,
+                  CustomerTrainingPlace.outdoors,
+                ])
+                  _buildPlaceChip(
+                    place: option,
+                    selected: place == option,
+                    enabled: !atGym || option == CustomerTrainingPlace.gym,
                   ),
               ],
             ),
-
-          const SizedBox(height: 24),
-
-          Text(
-            'Times shown are based on ${trainer.fullName}’s current availability.',
-
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.45),
+          ],
+        ),
+        if (atGym)
+          _buildFixedLocation()
+        else
+          GSWTextField(
+            size: GSWTextFieldSize.large,
+            controller: _areaController,
+            label: isHome ? 'Your address' : 'Preferred area',
+            leadingIcon: GSWIcons.location,
+            enabled: place != null,
+            hintText: _areaHint(place),
+            helpingText: _areaHelpingText(place),
+            errorText: _locationError,
+            keyboardType: isHome ? TextInputType.streetAddress : TextInputType.text,
+            textInputAction: TextInputAction.done,
+            onChanged: (_) => setState(() {}),
+            onComplete: (_) {
+              if (_stepComplete) _goNext();
+            },
           ),
-        ],
       ],
     );
   }
 
-  String get _finalTrainingDescription {
-    if (_venueChoice == BookingVenueChoice.trainerPrivateGym && _hasPrivateGym) {
-      return 'at his gym';
-    }
-
-    return _customerVenueDescription;
-  }
-
-  Widget _buildDateCard(DateTime date) {
-    final selected = _selectedDate != null && _sameDate(_selectedDate!, date);
-
-    final available = _dateHasAvailability(date);
-
-    return Material(
-      color: Colors.transparent,
-
-      child: InkWell(
-        onTap: available
-            ? () {
-                setState(() {
-                  _selectedDate = date;
-
-                  _selectedTime = null;
-                });
-              }
-            : null,
-
-        borderRadius: BorderRadius.circular(12),
-
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-
-          width: 46,
-
-          padding: const EdgeInsets.symmetric(vertical: 8),
-
-          decoration: BoxDecoration(
-            color: selected ? GSWColors.primary : GSWColors.backgroundPrimary,
-
-            borderRadius: BorderRadius.circular(12),
-
-            border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
-          ),
-
-          child: Opacity(
-            opacity: available ? 1 : 0.38,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-
-              children: [
-                Text(
-                  _shortWeekday(date),
-
-                  style: GSWTextStyles.bodyExtraSmall.copyWith(
-                    color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
-                  ),
-                ),
-
-                const SizedBox(height: 4),
-
-                Text(
-                  '${date.day}',
-
-                  style: GSWTextStyles.bodyLarge.copyWith(
-                    color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
-
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
+  /// The trainer's own gym: the address is fixed, so it is shown, not edited.
+  Widget _buildFixedLocation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Preferred area',
+          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTimeCard(String time) {
-    final selected = _selectedTime == time;
-
-    return Material(
-      color: Colors.transparent,
-
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _selectedTime = time;
-          });
-        },
-
-        borderRadius: BorderRadius.circular(12),
-
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-
+        const SizedBox(height: 8),
+        Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: selected ? GSWColors.primary : GSWColors.surfacePrimary,
-
-            borderRadius: BorderRadius.circular(12),
-
-            border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
+            color: GSWColors.surfacePrimary,
+            borderRadius: BorderRadius.circular(GSWRadius.control),
+            border: Border.all(color: GSWColors.borderSecondary),
           ),
-
-          child: Column(
+          child: Row(
             children: [
-              Text(
-                time,
-
-                textAlign: TextAlign.center,
-
-                style: GSWTextStyles.titleExtraSmall.copyWith(
-                  color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
-
-                  fontWeight: FontWeight.w600,
-                ),
+              SvgPicture.asset(
+                GSWIcons.location,
+                width: 20,
+                height: 20,
+                colorFilter: const ColorFilter.mode(GSWColors.iconSecondary, BlendMode.srcIn),
               ),
-
-              const SizedBox(height: 3),
-
-              Text(
-                '60 min',
-
-                style: GSWTextStyles.bodyExtraSmall.copyWith(
-                  color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _gymLocationLabel ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary, height: 1),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  // =============================================================================
-
-  // REVIEW
-
-  // =============================================================================
-
-  Widget _buildReviewStep() {
-    return _stepScroll(
-      children: [
-        _buildPageHeading(title: 'Review and pay'),
-
-        const SizedBox(height: 24),
-
-        _buildBookingSummaryCard(),
-
-        const SizedBox(height: 24),
-
-        GSWTextArea(
-          size: GSWTextAreaSize.large,
-
-          controller: _notesController,
-
-          label: 'Anything $_trainerFirstName should know?',
-
-          hintText: 'Anything $_trainerFirstName should know before the session...',
-
-          helpingText: 'Please don’t include health details here.',
-
-          maxLength: 250,
-
-          onChanged: (_) {
-            setState(() {});
-          },
-        ),
-
         const SizedBox(height: 8),
-
         Text(
-          '$_trainerFirstName receives your name and mobile number so they can reach you on the day.',
-
+          _areaHelpingText(null) ?? '',
           style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
         ),
-
-        const SizedBox(height: 24),
-
-        _buildPriceBreakdown(),
-
-        const SizedBox(height: 24),
-
-        Text(
-          'Cancellation',
-
-          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
-        ),
-
-        const SizedBox(height: 8),
-
-        Text(
-          '24 hours or more before: the session fee is refunded. '
-          'Less than 24 hours before: half the session fee is refunded. '
-          'If you don’t turn up: nothing is refunded. '
-          'The 5% service fee is not refunded when you cancel. '
-          'You can move the booking once. '
-          'If $_trainerFirstName cancels or doesn’t turn up, you choose a full refund, a new time, or another trainer.',
-
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-        ),
-
-        const SizedBox(height: 24),
-
-        Text('Pay with', style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary)),
-
-        const SizedBox(height: 8),
-
-        Row(
-          children: [
-            Expanded(
-              child: _buildPaymentMethod(method: BookingPaymentMethod.card, label: 'Card'),
-            ),
-
-            const SizedBox(width: 8),
-
-            Expanded(
-              child: _buildPaymentMethod(method: BookingPaymentMethod.applePay, label: 'Apple Pay'),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 20),
       ],
     );
   }
 
-  Widget _buildBookingSummaryCard() {
+  Widget _buildPlaceChip({
+    required CustomerTrainingPlace place,
+    required bool selected,
+    required bool enabled,
+  }) {
+    final label = switch (place) {
+      CustomerTrainingPlace.home => 'Home',
+      CustomerTrainingPlace.gym => 'Gym',
+      CustomerTrainingPlace.outdoors => 'Outdoors',
+    };
+
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? () => _selectTrainingPlace(place) : null,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? GSWColors.primary : GSWColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(GSWRadius.full),
+                border: Border.all(
+                  color: selected ? GSWColors.primary : GSWColors.borderSecondary,
+                ),
+              ),
+              child: Text(
+                label,
+                style: GSWTextStyles.labelLarge.copyWith(
+                  color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _areaHint(CustomerTrainingPlace? place) {
+    if (_atTrainerGym) return _gymLocationLabel ?? '';
+
+    switch (place) {
+      case CustomerTrainingPlace.home:
+        return 'Villa or building, street and area';
+      case CustomerTrainingPlace.gym:
+        return 'Gym name and area, e.g. Dubai Marina';
+      case CustomerTrainingPlace.outdoors:
+        return 'Park or area, e.g. Kite Beach';
+      case null:
+        return 'Choose where first';
+    }
+  }
+
+  String? _areaHelpingText(CustomerTrainingPlace? place) {
+    if (_atTrainerGym) {
+      return 'You are training at ${GSWPronoun.possessive(_gender)} gym. Go back to change this.';
+    }
+
+    if (place == CustomerTrainingPlace.home) {
+      final length = _areaController.text.trim().length;
+      if (length > 0 && length < _minHomeAddressLength) {
+        return 'Add your building or villa and street so $_firstName can find you.';
+      }
+      return '$_firstName needs your full address for a home session.';
+    }
+
+    return null;
+  }
+
+  // ===========================================================================
+  // STEP 3, TIME (5.3)
+  // ===========================================================================
+
+  Widget _buildTimeStep() {
+    final selectedDate = _selectedDate;
+    final starts = selectedDate == null ? const <DateTime>[] : _startsOn(selectedDate);
+
+    return _stepScroll(
+      children: [
+        _buildHeading(title: 'Pick a time', subtitle: _subtitle, titleHeight: 30),
+        Text(
+          '60 minutes $_sessionPlacePhrase, $_finalLocationLabel',
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+        ),
+        Row(
+          children: [
+            for (var index = 0; index < _dates.length; index++) ...[
+              if (index > 0) const SizedBox(width: 8),
+              Expanded(child: _buildDateCell(_dates[index])),
+            ],
+          ],
+        ),
+        if (_availabilityStarts.isEmpty)
+          _buildNoTimesCard()
+        else if (selectedDate != null) ...[
+          Text(
+            GSWTime.dayLong(selectedDate),
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final slotWidth = (constraints.maxWidth - 16) / 3;
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final start in starts)
+                    SizedBox(width: slotWidth, child: _buildSlot(start)),
+                ],
+              );
+            },
+          ),
+        ],
+        Text(
+          'Times are in Dubai time and show when $_firstName is free this week.',
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNoTimesCard() {
     return Container(
       width: double.infinity,
-
       padding: const EdgeInsets.all(16),
-
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No open times this week',
+            style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$_firstName has no free 60 minute slots in the next 7 days. Check again later, or go back and pick another trainer.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          GSWButton(
+            label: 'Check again',
+            onPressed: () => _loadTrainerBookingData(),
+            variant: GSWButtonVariant.secondary,
+            size: GSWButtonSize.medium,
+          ),
+        ],
+      ),
+    );
+  }
 
+  Widget _buildDateCell(DateTime date) {
+    const weekdays = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+
+    final selected = _selectedDate != null && GSWTime.isSameDay(_selectedDate!, date);
+    final available = _dateHasAvailability(date);
+
+    final topColor = selected
+        ? GSWColors.textInverse
+        : available
+            ? GSWColors.textSecondary
+            : GSWColors.textTertiary;
+
+    final bottomColor = selected
+        ? GSWColors.textInverse
+        : available
+            ? GSWColors.textPrimary
+            : GSWColors.textTertiary;
+
+    return Semantics(
+      selected: selected,
+      enabled: available,
+      button: true,
+      label: GSWTime.dayLong(date),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: available
+              ? () {
+                  setState(() {
+                    _selectedDate = date;
+                    if (_selectedStart != null && !GSWTime.isSameDay(_selectedStart!, date)) {
+                      _selectedStart = null;
+                    }
+                  });
+                }
+              : null,
+          borderRadius: BorderRadius.circular(GSWRadius.control),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: 60,
+            decoration: BoxDecoration(
+              color: selected ? GSWColors.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(GSWRadius.control),
+              border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  weekdays[date.weekday - 1],
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(color: topColor, height: 14 / 11),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${date.day}',
+                  style: GSWTextStyles.labelLarge.copyWith(
+                    color: bottomColor,
+                    fontWeight: FontWeight.w600,
+                    height: 20 / 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSlot(DateTime start) {
+    final selected = _selectedStart == start;
+
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: '${GSWTime.dayLong(start)}, ${GSWTime.time(start)}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            setState(() {
+              _selectedStart = start;
+            });
+          },
+          borderRadius: BorderRadius.circular(GSWRadius.control),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            // 64 at the default text size, taller rather than overflowing when
+            // the person uses a larger font.
+            constraints: const BoxConstraints(minHeight: 64),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            decoration: BoxDecoration(
+              color: selected ? GSWColors.primary : GSWColors.surfacePrimary,
+              borderRadius: BorderRadius.circular(GSWRadius.control),
+              border: Border.all(color: selected ? GSWColors.primary : GSWColors.neutral700),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    GSWTime.time(start),
+                    style: GSWTextStyles.titleExtraSmall.copyWith(
+                      color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      height: 24 / 18,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '60 min',
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(
+                    color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
+                    height: 14 / 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // STEP 4, REVIEW AND PAY (5.4, 11.2e)
+  // ===========================================================================
+
+  Widget _buildReviewStep() {
+    return _stepScroll(
+      topPadding: 8,
+      children: [
+        Text(
+          'Review and pay',
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
+        ),
+        if (_showPriceChangedNotice) _buildPriceChangedNotice(),
+        _buildSummaryCard(),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GSWTextArea(
+              size: GSWTextAreaSize.medium,
+              controller: _notesController,
+              label: 'Anything $_firstName should know?',
+              hintText: 'Anything $_firstName should know before the session...',
+              helpingText: 'Please don’t include health details here.',
+              maxLength: 250,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$_firstName receives your name and mobile number so ${GSWPronoun.subject(_gender)} can reach you on the day.',
+              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 18 / 12),
+            ),
+          ],
+        ),
+        _buildPriceCard(),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Cancellation',
+              style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _cancellationCopy,
+              style: GSWTextStyles.bodySmall.copyWith(
+                color: GSWColors.textSecondary,
+                fontSize: 13,
+                height: 18 / 13,
+              ),
+            ),
+          ],
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pay with',
+              style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildPaymentMethod(method: BookingPaymentMethod.card, label: 'Card'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildPaymentMethod(
+                    method: BookingPaymentMethod.applePay,
+                    label: 'Apple Pay',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// v1.2 cancellation policy, with this booking's numbers.
+  String get _cancellationCopy {
+    final rate = GSWMoney.aed(_sessionRate);
+    final half = GSWMoney.aed(GSWMoney.half(_sessionRate));
+    final fee = GSWMoney.aed(_serviceFee);
+    final total = GSWMoney.aed(_total);
+
+    return '24 hours or more before: the $rate session rate back. '
+        'Less than 24 hours before: $half back, half the session rate. '
+        'If you don’t turn up: nothing back. '
+        'The $fee service fee isn’t refunded when you cancel. '
+        'You can move the booking once, free up to 24 hours before. '
+        'A later move costs the same as a late cancellation. '
+        'If $_firstName cancels or doesn’t turn up, you choose: the full $total back, a new time, or another trainer.';
+  }
+
+  Widget _buildPriceChangedNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: GSWColors.backgroundWarning,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+        border: Border.all(color: GSWColors.borderWarning),
+      ),
+      child: Text(
+        '$_firstName’s price has changed since you started. Check the new total below, then pay. You have not been charged.',
+        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+      ),
+    );
+  }
+
+  Widget _buildSummaryCard() {
+    final start = _selectedStart;
+    final goal = widget.initialGoal?.trim() ?? '';
+    final imageUrl = trainer.profileImageUrl?.trim() ?? '';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: GSWColors.surfacePrimary,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+      ),
       child: Column(
         children: [
           Row(
             children: [
-              Container(
-                width: 48,
-
-                height: 48,
-
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-
-                  color: GSWColors.surfaceInteractive,
-
-                  image: trainer.profileImageUrl?.isNotEmpty == true
-                      ? DecorationImage(
-                          image: NetworkImage(trainer.profileImageUrl!),
-
-                          fit: BoxFit.cover,
-                        )
-                      : null,
+              // TrainerPhoto falls back to initials if the image fails.
+              ClipOval(
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: TrainerPhoto(
+                    name: trainer.fullName,
+                    imageUrl: imageUrl.isEmpty ? null : imageUrl,
+                    initialsStyle: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary),
+                  ),
                 ),
-
-                alignment: const Alignment(0, -1),
-
-                child: trainer.profileImageUrl?.isNotEmpty == true
-                    ? null
-                    : Text(
-                        trainer.fullName.trim().isEmpty
-                            ? ''
-                            : trainer.fullName.trim()[0].toUpperCase(),
-
-                        style: GSWTextStyles.bodyLarge.copyWith(
-                          color: GSWColors.textPrimary,
-
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
               ),
-
               const SizedBox(width: 12),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-
                   children: [
                     Text(
                       trainer.fullName,
-
-                      style: GSWTextStyles.bodyLarge.copyWith(
+                      style: GSWTextStyles.labelLarge.copyWith(
                         color: GSWColors.textPrimary,
-
                         fontWeight: FontWeight.w600,
+                        height: 22 / 16,
                       ),
                     ),
-
+                    const SizedBox(height: 2),
                     Text(
-                      _trainerService,
-
+                      _service,
                       style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
                     ),
                   ],
                 ),
               ),
-
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _currentStep = 1;
-                  });
-                },
-
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-
-                  child: Text(
-                    'Edit',
-
-                    style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
+              Semantics(
+                button: true,
+                label: 'Edit booking',
+                child: InkWell(
+                  onTap: _editBooking,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      'Edit',
+                      style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textAccent, height: 1),
+                    ),
                   ),
                 ),
               ),
             ],
           ),
-
-          const SizedBox(height: 14),
-
-          const Divider(height: 1, color: GSWColors.borderSecondary),
-
-          const SizedBox(height: 14),
-
+          const SizedBox(height: 12),
+          Container(height: 1, color: GSWColors.surfaceInteractive),
+          const SizedBox(height: 12),
           _buildSummaryRow(
             label: 'When',
-
-            value: _selectedDate == null || _selectedTime == null
+            value: start == null
                 ? ''
-                : '${_fullDate(_selectedDate!)}, $_selectedTime',
+                : '${GSWTime.dayShort(start)}, ${GSWTime.timeRange(start, _sessionLength)}',
           ),
-
-          const SizedBox(height: 10),
-
-          _buildSummaryRow(label: 'Where', value: _finalLocationLabel),
-
-          const SizedBox(height: 10),
-
-          _buildSummaryRow(
-            label: 'Training',
-
-            value: _venueChoice == BookingVenueChoice.trainerPrivateGym
-                ? 'Trainer gym'
-                : '$_customerTrainingPlaceLabel · $_customerLocationLabel',
-          ),
-
-          if (widget.initialGoal?.trim().isNotEmpty == true) ...[
-            const SizedBox(height: 10),
-
-            _buildSummaryRow(label: 'Goal', value: widget.initialGoal!.trim()),
+          const SizedBox(height: 12),
+          _buildSummaryRow(label: 'Where', value: _whereLabel),
+          if (goal.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildSummaryRow(label: 'Goal', value: GSWPronoun.capitalise(goal)),
           ],
         ],
       ),
@@ -1417,72 +1463,51 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
 
   Widget _buildSummaryRow({required String label, required String value}) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        SizedBox(
-          width: 70,
-
-          child: Text(
-            label,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
+        Text(
+          label,
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
         ),
-
+        const SizedBox(width: 16),
         Expanded(
           child: Text(
             value,
-
             textAlign: TextAlign.right,
-
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary, height: 1),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildPriceBreakdown() {
+  Widget _buildPriceCard() {
     return Container(
       width: double.infinity,
-
       padding: const EdgeInsets.all(16),
-
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
-
       child: Column(
         children: [
-          _buildPriceRow(label: 'Session, 60 minutes', amount: _activeSessionRate),
-
+          _buildPriceRow(label: 'Session, 60 minutes', amount: _sessionRate),
           const SizedBox(height: 10),
-
           _buildPriceRow(label: 'Service fee (5%)', amount: _serviceFee),
-
           const SizedBox(height: 10),
-
-          const Divider(height: 1, color: GSWColors.surfaceInteractive),
-
+          Container(height: 1, color: GSWColors.surfaceInteractive),
           const SizedBox(height: 10),
-
           Row(
             children: [
               Expanded(
                 child: Text(
                   'Total',
-
-                  style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary),
+                  style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary, height: 1),
                 ),
               ),
-
               Text(
-                'AED $_total',
-
-                style: GSWTextStyles.headingSmall.copyWith(color: GSWColors.primary),
+                GSWMoney.aed(_total),
+                style: GSWTextStyles.headingSmall.copyWith(color: GSWColors.textAccent, height: 1),
               ),
             ],
           ),
@@ -1497,15 +1522,12 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
         Expanded(
           child: Text(
             label,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
           ),
         ),
-
         Text(
-          'AED $amount',
-
-          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
+          GSWMoney.aed(amount),
+          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary, height: 20 / 14),
         ),
       ],
     );
@@ -1514,156 +1536,28 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
   Widget _buildPaymentMethod({required BookingPaymentMethod method, required String label}) {
     final selected = _paymentMethod == method;
 
-    return Material(
-      color: Colors.transparent,
-
-      child: InkWell(
-        onTap: () {
-          setState(() {
-            _paymentMethod = method;
-          });
-        },
-
-        borderRadius: BorderRadius.circular(10),
-
-        child: Container(
-          height: 50,
-
-          alignment: Alignment.center,
-
-          decoration: BoxDecoration(
-            color: GSWColors.surfacePrimary,
-
-            borderRadius: BorderRadius.circular(10),
-
-            border: Border.all(color: selected ? GSWColors.primary : GSWColors.surfaceInteractive),
-          ),
-
-          child: Text(
-            label,
-
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // =============================================================================
-
-  // BOTTOM ACTIONS
-
-  // =============================================================================
-
-  Widget _buildBottomActions() {
-    return Container(
-      color: GSWColors.surfacePrimary,
-
-      child: SafeArea(
-        top: false,
-
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-
-          child: _isReviewStep
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-
-                  children: [
-                    GSWButton(
-                      label: 'Continue to payment',
-
-                      onPressed: _continueToPayment,
-
-                      variant: GSWButtonVariant.primary,
-
-                      size: GSWButtonSize.large,
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    Text(
-                      'Payments are processed securely by our payment provider. Your card details never reach GetSetWell.',
-
-                      textAlign: TextAlign.center,
-
-                      style: GSWTextStyles.bodyExtraSmall.copyWith(color: GSWColors.textTertiary),
-                    ),
-                  ],
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-
-                  children: [
-                    GSWButton(
-                      label: _currentStep == 1 ? 'Back to $_trainerFirstName' : 'Back',
-
-                      onPressed: _currentStep == 1 ? _closeFlow : _goBack,
-
-                      variant: GSWButtonVariant.secondary,
-
-                      size: GSWButtonSize.large,
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    GSWButton(
-                      label: 'Continue',
-
-                      onPressed: _stepComplete ? _goNext : null,
-
-                      variant: _stepComplete ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
-
-                      size: GSWButtonSize.large,
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    );
-  }
-
-  // =============================================================================
-
-  // SHARED UI
-
-  // =============================================================================
-
-  Widget _buildChoiceChip({
-    required String label,
-
-    required bool selected,
-
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-
-      child: InkWell(
-        onTap: onTap,
-
-        borderRadius: BorderRadius.circular(999),
-
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-
-          height: 40,
-
-          alignment: Alignment.center,
-
-          decoration: BoxDecoration(
-            color: selected ? GSWColors.primary : GSWColors.surfacePrimary,
-
-            borderRadius: BorderRadius.circular(999),
-
-            border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
-          ),
-
-          child: Text(
-            label,
-
-            style: GSWTextStyles.labelLarge.copyWith(
-              color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => setState(() => _paymentMethod = method),
+          borderRadius: BorderRadius.circular(GSWRadius.control),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: GSWColors.surfacePrimary,
+              borderRadius: BorderRadius.circular(GSWRadius.control),
+              border: Border.all(
+                width: selected ? 1.5 : 1,
+                color: selected ? GSWColors.primary : GSWColors.surfaceInteractive,
+              ),
+            ),
+            child: Text(
+              label,
+              style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary, height: 20 / 14),
             ),
           ),
         ),
@@ -1671,77 +1565,134 @@ class _BookingRequestScreenState extends State<BookingRequestScreen> {
     );
   }
 
-  Widget _stepScroll({required List<Widget> children}) {
-    return ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+  // ===========================================================================
+  // BOTTOM BAR
+  // ===========================================================================
 
-      child: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
+  Widget _buildBottomBar() {
+    if (_currentStep == _stepReview) {
+      final canPay = _selectedStart != null && _sessionRate > 0 && !_isOpeningPayment;
 
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+      return Container(
+        color: GSWColors.surfacePrimary,
+        child: SafeArea(
+          top: false,
+          minimum: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GSWButton(
+                  label: 'Pay ${GSWMoney.aed(_total)} and confirm',
+                  onPressed: canPay ? _continueToPayment : null,
+                  variant: canPay ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+                  size: GSWButtonSize.large,
+                  isLoading: _isOpeningPayment,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Payments are processed securely by our payment provider. Your card details never reach GetSetWell.',
+                  textAlign: TextAlign.center,
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(
+                    color: GSWColors.textSecondary,
+                    height: 14 / 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-      ),
-    );
-  }
-
-  Widget _buildPageHeading({required String title, String? subtitle}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-
+    return _bottomBarShell(
       children: [
-        Text(title, style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary)),
-
-        if (subtitle != null && subtitle.trim().isNotEmpty) ...[
-          const SizedBox(height: 8),
-
-          Text(subtitle, style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
-        ],
+        GSWButton(
+          label: _currentStep == _stepSession ? 'Back to $_firstName' : 'Back',
+          onPressed: _goBack,
+          variant: GSWButtonVariant.secondary,
+          size: GSWButtonSize.large,
+        ),
+        GSWButton(
+          label: 'Continue',
+          onPressed: _stepComplete ? _goNext : null,
+          variant: _stepComplete ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+          size: GSWButtonSize.large,
+        ),
       ],
     );
   }
 
-  bool _sameDate(DateTime first, DateTime second) {
-    return first.year == second.year && first.month == second.month && first.day == second.day;
+  Widget _bottomBarShell({required List<Widget> children}) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: GSWColors.surfacePrimary,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(GSWRadius.card)),
+      ),
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < children.length; index++) ...[
+                if (index > 0) const SizedBox(height: 8),
+                children[index],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  String _shortWeekday(DateTime date) {
-    const weekdays = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
+  // ===========================================================================
+  // SHARED LAYOUT
+  // ===========================================================================
 
-    return weekdays[date.weekday - 1];
+  Widget _stepScroll({required List<Widget> children, double topPadding = 16}) {
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+      child: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(16, topPadding, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(),
+            for (final child in children) ...[
+              const SizedBox(height: 24),
+              child,
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
-  String _fullDate(DateTime date) {
-    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-    const months = [
-      'January',
-
-      'February',
-
-      'March',
-
-      'April',
-
-      'May',
-
-      'June',
-
-      'July',
-
-      'August',
-
-      'September',
-
-      'October',
-
-      'November',
-
-      'December',
-    ];
-
-    return '${weekdays[date.weekday - 1]}, '
-        '${date.day} '
-        '${months[date.month - 1]}';
+  Widget _buildHeading({required String title, String? subtitle, double titleHeight = 24}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GSWTextStyles.titleLarge.copyWith(
+            color: GSWColors.textPrimary,
+            height: titleHeight / 24,
+          ),
+        ),
+        if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+          ),
+        ],
+      ],
+    );
   }
 }

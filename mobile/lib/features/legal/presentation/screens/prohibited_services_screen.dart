@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/gsw_routes.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
+import 'legal_document_parts.dart';
 
+/// Prohibited Services (Figma full text 1109:3763). Text is v1.2.
 class ProhibitedServicesScreen extends StatefulWidget {
   const ProhibitedServicesScreen({super.key, this.onReadArabic});
 
@@ -307,7 +310,7 @@ class _ProhibitedServicesScreenState extends State<ProhibitedServicesScreen> {
           elevation: 0,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
         ),
@@ -323,77 +326,66 @@ class _ProhibitedServicesScreenState extends State<ProhibitedServicesScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildTopBar(context),
+            LegalDocTopBar(onReadArabic: _handleReadArabic),
 
             Expanded(
               child: ScrollConfiguration(
                 behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
+                  padding: kLegalContentPadding,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Prohibited Services',
-                        style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
+                      const LegalDocTitle(
+                        title: 'Prohibited Services',
+                        version: 'Version 1.2 · 28 September 2026',
+                        intro:
+                            'This policy forms part of the Trainer Agreement and of the Terms of Service. It applies to every trainer listed on GetSetWell: to their profile and marketing, to sessions booked through GetSetWell, and to coaching they provide directly to clients we introduced.',
                       ),
 
-                      const SizedBox(height: 6),
+                      const SizedBox(height: kLegalBlockGap),
 
-                      Text(
-                        'Version 1.2 · 28 September 2026',
-                        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'This policy forms part of the Trainer Agreement and of the Terms of Service. It applies to every trainer listed on GetSetWell: to their profile and marketing, to sessions booked through GetSetWell, and to coaching they provide directly to clients we introduced.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                          height: 1.45,
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      _buildShortVersionCard(),
-
-                      const SizedBox(height: 24),
-
-                      _buildSearchField(),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Text(
-                            _allExpanded
-                                ? 'All 11 sections, expanded'
-                                : '${_expandedSections.length} of 11 sections expanded',
-                            style: GSWTextStyles.labelMedium.copyWith(
-                              color: GSWColors.textSecondary,
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          GestureDetector(
-                            onTap: _toggleAll,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                _allExpanded ? 'Collapse all' : 'Expand all',
-                                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
-                              ),
-                            ),
-                          ),
+                      const LegalShortVersionCard(
+                        points: [
+                          'Trainers on GetSetWell are fitness coaches. Nothing they provide through us is medical care.',
+                          'No diagnosis, treatment, physiotherapy, therapeutic meal plans, counselling or therapeutic massage.',
+                          'No supplements or other products sold to you, and no prescription or controlled substances.',
+                          'Swimming, cycling, outdoor, pre and postnatal and home sessions have extra safety conditions.',
+                          'If a trainer offers you something that sounds like treatment, or tries to sell you something, tell us.',
                         ],
+                        footnote: 'A summary to help you. The full policy below is what applies.',
                       ),
 
-                      const SizedBox(height: 8),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSearchField(
+                        controller: _searchController,
+                        hintText: 'Search the policy',
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        onClear: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSectionsHeader(
+                        label: _allExpanded
+                            ? 'All ${_sections.length} sections, expanded'
+                            : 'All ${_sections.length} sections',
+                        allExpanded: _allExpanded,
+                        onToggle: _toggleAll,
+                      ),
+
+                      const SizedBox(height: 4),
 
                       if (visibleIndexes.isEmpty)
                         Padding(
@@ -407,16 +399,34 @@ class _ProhibitedServicesScreenState extends State<ProhibitedServicesScreen> {
                             ),
                           ),
                         )
-                      else
+                      else ...[
+                        const LegalDivider(),
                         for (final index in visibleIndexes) ...[
                           _buildSection(index, _sections[index]),
-
-                          if (index != visibleIndexes.last)
-                            const Divider(height: 1, color: GSWColors.borderSecondary),
+                          const LegalDivider(),
                         ],
-                      const SizedBox(height: 32),
+                      ],
 
-                      _buildFooter(),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalReadWith(
+                        links: [
+                          LegalLink(
+                            'Terms of Service',
+                            () => context.push(GSWRoutes.termsOfService),
+                          ),
+                          LegalLink('Privacy Policy', () => context.push(GSWRoutes.privacyPolicy)),
+                        ],
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      const LegalDocFooter(
+                        contactHeading: 'Report something under this policy',
+                        contactLine: 'support@getsetwell.com · WhatsApp +971 50 525 1393',
+                        note:
+                            'Published in Arabic and English. For clients, if the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
+                      ),
                     ],
                   ),
                 ),
@@ -428,432 +438,47 @@ class _ProhibitedServicesScreenState extends State<ProhibitedServicesScreen> {
     );
   }
 
-  Widget _buildBackButton(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (context.canPop()) {
-            context.pop();
-          }
-        },
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: GSWColors.borderSecondary),
-          ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopBar(BuildContext context) {
-    return SizedBox(
-      height: 54,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            _buildBackButton(context),
-
-            const Spacer(),
-
-            TextButton(
-              onPressed: _handleReadArabic,
-              style: TextButton.styleFrom(
-                foregroundColor: GSWColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              child: Text(
-                'Read in Arabic',
-                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortVersionCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'THE SHORT VERSION',
-            style: GSWTextStyles.labelSmall.copyWith(
-              color: GSWColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          _summaryItem(
-            'Trainers on GetSetWell are fitness coaches. Nothing they provide through us is medical care.',
-          ),
-
-          _summaryItem(
-            'No diagnosis, treatment, physiotherapy, therapeutic meal plans, counselling or therapeutic massage.',
-          ),
-
-          _summaryItem(
-            'No supplements or other products sold to you, and no prescription or controlled substances.',
-          ),
-
-          _summaryItem(
-            'Swimming, cycling, outdoor, pre and postnatal and home sessions have extra safety conditions.',
-          ),
-
-          _summaryItem(
-            'If a trainer offers you something that sounds like treatment, or tries to sell you something, tell us.',
-          ),
-
-          const SizedBox(height: 8),
-
-          Text(
-            'A summary to help you. The full policy below is what applies.',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 11),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 1.45),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchField() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: TextField(
-        controller: _searchController,
-        cursorColor: GSWColors.primary,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search the policy',
-          hintStyle: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          prefixIcon: const Icon(Icons.search_rounded, color: GSWColors.textSecondary, size: 20),
-          suffixIcon: _searchQuery.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                  icon: const Icon(Icons.close_rounded, color: GSWColors.textSecondary, size: 18),
-                ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 13),
-        ),
-      ),
-    );
+  /// Table header per section (Figma 1109:4037 and 1109:4156).
+  String? _tableHeader(_LegalSection section) {
+    switch (section.number) {
+      case '05':
+        return 'INSTEAD OF  ·  SAY';
+      case '08':
+        return 'SITUATION  ·  WHAT WE DO';
+      default:
+        return null;
+    }
   }
 
   Widget _buildSection(int index, _LegalSection section) {
-    final expanded = _expandedSections.contains(index);
+    LegalParagraph paragraph(String text) => LegalParagraph(text, detectHeading: true);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => _toggleSection(index),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    section.number,
-                    style: GSWTextStyles.titleSmall.copyWith(
-                      color: GSWColors.primary,
-                      fontFamily: 'BebasNeue',
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      section.title,
-                      style: GSWTextStyles.labelLarge.copyWith(
-                        color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Icon(
-                  expanded ? Icons.remove_rounded : Icons.add_rounded,
-                  size: 20,
-                  color: GSWColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-
-          if (expanded) ...[
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final paragraph in section.paragraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.bullets) _bullet(bullet),
-
-                  for (final paragraph in section.trailingParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.trailingBullets) _bullet(bullet),
-
-                  for (final paragraph in section.secondaryParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.secondaryBullets) _bullet(bullet),
-
-                  for (final paragraph in section.tertiaryParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.tertiaryBullets) _bullet(bullet),
-
-                  for (final paragraph in section.finalParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.finalBullets) _bullet(bullet),
-
-                  for (final card in section.cards) _policyCard(card),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _policyCard(_PolicyCard card) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            card.title,
-            style: GSWTextStyles.bodyLarge.copyWith(
-              color: GSWColors.textPrimary,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-
-          const SizedBox(height: 6),
-
-          for (var index = 0; index < card.lines.length; index++) ...[
-            Text(
-              card.lines[index],
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            if (index != card.lines.length - 1) const SizedBox(height: 6),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _paragraph(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Text(
-        text,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-      ),
-    );
-  }
-
-  Widget _bullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooterLink({required String label, required VoidCallback onTap}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-                ),
-              ),
-
-              const Icon(Icons.chevron_right_rounded, color: GSWColors.textSecondary, size: 26),
+    return LegalAccordionSection(
+      number: section.number,
+      title: section.title,
+      expanded: _expandedSections.contains(index),
+      onTap: () => _toggleSection(index),
+      children: [
+        for (final text in section.paragraphs) paragraph(text),
+        for (final bullet in section.bullets) LegalBullet(bullet),
+        // The table sits before the trailing text (5.3 then table then 5.4;
+        // table then 8.1), as in the design.
+        if (section.cards.isNotEmpty)
+          LegalTable(
+            header: _tableHeader(section),
+            rows: [
+              for (final card in section.cards)
+                LegalTableRow(title: card.title, lines: card.lines),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _footerDivider() {
-    return const Divider(height: 1, color: GSWColors.borderSecondary);
-  }
-
-  Widget _buildFooter() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'READ WITH THESE',
-          style: GSWTextStyles.labelMedium.copyWith(
-            color: GSWColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        _buildFooterLink(
-          label: 'Terms of Service',
-          onTap: () {
-            context.push(GSWRoutes.termsOfService);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Privacy Policy',
-          onTap: () {
-            context.push(GSWRoutes.privacyPolicy);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Cancellation and Refunds Policy',
-          onTap: () {
-            context.push(GSWRoutes.cancellationAndRefund);
-          },
-        ),
-        _footerDivider(),
-
-        const SizedBox(height: 24),
-        Text(
-          'Report something under this policy',
-          style: GSWTextStyles.labelLarge.copyWith(
-            color: GSWColors.textPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          'info@getsetwell.com · WhatsApp +971 50 525 1393',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.primary),
-        ),
-        const SizedBox(height: 24),
-
-        Text(
-          'Published in Arabic and English. For clients, if the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-        ),
+        for (final text in section.trailingParagraphs) paragraph(text),
+        for (final bullet in section.trailingBullets) LegalBullet(bullet),
+        for (final text in section.secondaryParagraphs) paragraph(text),
+        for (final bullet in section.secondaryBullets) LegalBullet(bullet),
+        for (final text in section.tertiaryParagraphs) paragraph(text),
+        for (final bullet in section.tertiaryBullets) LegalBullet(bullet),
+        for (final text in section.finalParagraphs) paragraph(text),
+        for (final bullet in section.finalBullets) LegalBullet(bullet),
       ],
     );
   }

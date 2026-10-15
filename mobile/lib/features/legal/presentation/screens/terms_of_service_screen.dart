@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/gsw_routes.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
+import 'legal_document_parts.dart';
 
+/// 12.5a Terms of Service (Figma 1068:3500, full text 1106:3680). Text is v1.2.
 class TermsOfServiceScreen extends StatefulWidget {
-  const TermsOfServiceScreen({super.key, this.onReadArabic});
+  const TermsOfServiceScreen({super.key, this.onReadArabic, this.embedded = false});
 
   final VoidCallback? onReadArabic;
+
+  /// True when shown inside the sign-up legal sheet (Figma 12.5c): only the
+  /// document body is built. The sheet supplies its own title, version,
+  /// scrolling and close controls.
+  final bool embedded;
 
   @override
   State<TermsOfServiceScreen> createState() => _TermsOfServiceScreenState();
@@ -61,7 +69,7 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
       title: 'Your account',
       paragraphs: [
         '3.1  You must be 18 or over to create an account or book a session. We do not arrange sessions for anyone under 18. We do not ask for your date of birth. You confirm your age when you create your account.',
-        '3.2  We verify your mobile number with a one-time code sent by WhatsApp, so you need WhatsApp to use GetSetWell. Keep your phone and your codes secure. You are responsible for bookings made from your account.',
+        '3.2  We verify your mobile number with a one-time code sent by SMS, so you need a mobile number that can receive SMS to use GetSetWell. Keep your phone and your codes secure. You are responsible for bookings made from your account.',
         '3.3  You can only book sessions for yourself. Anyone else who wants to train needs their own account.',
         '3.4  You can close your account in the app at any time. Any future booking must be cancelled first, under the Cancellation and Refunds Policy.',
       ],
@@ -90,7 +98,7 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
         'check that the trainer holds their own UAE trade licence or freelance permit, and record its number and expiry date',
         'record each qualification\'s name, the organisation that issued it, its status and dates, and check it against an official register or with the issuing organisation where one is available',
         'take two professional references',
-        'have a conversation with the trainer, in person or by video',
+        'have a written conversation with the trainer about how they work',
         'agree our conduct standards, and record the trainer\'s pricing, areas and availability',
         'confirm the trainer\'s insurance before their first paid session',
       ],
@@ -129,13 +137,13 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
         '7.1  These are set out in full in the Cancellation and Refunds Policy. In summary:',
       ],
       bullets: [
-        'You cancel 24 hours or more before the session — You get the session rate back. The service fee is not refunded.',
-        'You cancel less than 24 hours before the session — You get half the session rate back. The service fee is not refunded.',
-        'You reschedule 24 hours or more before the session — No charge.',
-        'You reschedule less than 24 hours before the session — Treated like a late cancellation. Half the session rate is kept, and you pay that half again to confirm the new time.',
-        'You do not turn up — Nothing is refunded.',
-        'Your trainer cancels, at any time, or does not turn up — You get everything back, including the service fee. Or, if you prefer, a new time with the same trainer, or another trainer.',
-        'We cancel your booking — You get everything back, including the service fee.',
+        'You cancel 24 hours or more before the session: You get the session rate back. The service fee is not refunded.',
+        'You cancel less than 24 hours before the session: You get half the session rate back. The service fee is not refunded.',
+        'You reschedule 24 hours or more before the session: No charge.',
+        'You reschedule less than 24 hours before the session: Treated like a late cancellation. Half the session rate is kept, and you pay that half again to confirm the new time.',
+        'You do not turn up: Nothing is refunded.',
+        'Your trainer cancels, at any time, or does not turn up: You get everything back, including the service fee. Or, if you prefer, a new time with the same trainer, or another trainer.',
+        'We cancel your booking: You get everything back, including the service fee.',
       ],
       trailingParagraphs: [
         '7.2  Rescheduling. Each booking can be rescheduled once.',
@@ -367,7 +375,7 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
           elevation: 0,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
         ),
@@ -378,82 +386,62 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
   Widget build(BuildContext context) {
     final visibleIndexes = _visibleIndexes;
 
-    return Scaffold(
-      backgroundColor: GSWColors.backgroundPrimary,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTopBar(context),
-
-            Expanded(
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
-                  child: Column(
+    final content = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Terms of Service',
-                        style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        'Version 1.2 · 28 September 2026',
-                        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'The agreement between you and Get Set Fit LLC when you use GetSetWell.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                          height: 1.45,
+                      if (!widget.embedded) ...[
+                      const LegalDocTitle(
+                          title: 'Terms of Service',
+                          version: 'Version 1.3 · 14 October 2026',
+                          intro:
+                              'The agreement between you and Get Set Fit LLC when you use GetSetWell.',
                         ),
-                      ),
+  
+                        const SizedBox(height: kLegalBlockGap),
+                      ],
 
-                      const SizedBox(height: 24),
 
-                      _buildShortVersionCard(),
-
-                      const SizedBox(height: 24),
-
-                      _buildSearchField(),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Text(
-                            _allExpanded
-                                ? 'All 21 sections, expanded'
-                                : '${_expandedSections.length} of 21 sections expanded',
-                            style: GSWTextStyles.labelMedium.copyWith(
-                              color: GSWColors.textSecondary,
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          GestureDetector(
-                            onTap: _toggleAll,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                _allExpanded ? 'Collapse all' : 'Expand all',
-                                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
-                              ),
-                            ),
-                          ),
+                      const LegalShortVersionCard(
+                        points: [
+                          'Trainers are independent professionals. Your coaching agreement is with them. We find and check them, and run your booking.',
+                          'You pay the trainer\'s rate plus a 5% service fee. The fee is kept if you cancel, reschedule late or don\'t turn up.',
+                          'Cancel 24 hours or more before and you get the session rate back. Less than 24 hours, half. No-show, nothing.',
+                          'If your trainer cancels or doesn\'t turn up, you get everything back, or a new time, or another trainer.',
+                          'You must be 18 or over, and you need a mobile number that can receive SMS to sign in.',
+                          'Sessions you arrange with a trainer outside the app aren\'t covered.',
                         ],
+                        footnote: 'A summary to help you. The full terms below are what apply.',
                       ),
 
-                      const SizedBox(height: 8),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSearchField(
+                        controller: _searchController,
+                        hintText: 'Search the terms',
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        onClear: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSectionsHeader(
+                        label: _allExpanded
+                            ? 'All ${_sections.length} sections, expanded'
+                            : 'All ${_sections.length} sections',
+                        allExpanded: _allExpanded,
+                        onToggle: _toggleAll,
+                      ),
+
+                      const SizedBox(height: 4),
 
                       if (visibleIndexes.isEmpty)
                         Padding(
@@ -467,403 +455,79 @@ class _TermsOfServiceScreenState extends State<TermsOfServiceScreen> {
                             ),
                           ),
                         )
-                      else
+                      else ...[
+                        const LegalDivider(),
                         for (final index in visibleIndexes) ...[
                           _buildSection(index, _sections[index]),
-
-                          if (index != visibleIndexes.last)
-                            const Divider(height: 1, color: GSWColors.borderSecondary),
+                          const LegalDivider(),
                         ],
-                      const SizedBox(height: 32),
+                      ],
 
-                      _buildFooter(),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      // Inside the sign-up sheet, links would open pages under the sheet.
+                      if (!widget.embedded) ...[
+                      LegalReadWith(
+                        links: [
+                          LegalLink('Privacy Policy', () => context.push(GSWRoutes.privacyPolicy)),
+                          LegalLink(
+                            'Cancellation and Refunds Policy',
+                            () => context.push(GSWRoutes.cancellationAndRefund),
+                          ),
+                          LegalLink(
+                            'Prohibited Services Policy',
+                            () => context.push(GSWRoutes.prohibitedServices),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+                      ],
+
+                      const LegalDocFooter(
+                        contactHeading: 'Questions about these terms?',
+                        contactLine: 'support@getsetwell.com · WhatsApp +971 50 525 1393',
+                      ),
                     ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+                  );
 
-  Widget _buildBackButton(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (context.canPop()) {
-            context.pop();
-          }
-        },
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: GSWColors.borderSecondary),
-          ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
-        ),
-      ),
-    );
-  }
+    if (widget.embedded) return content;
 
-  Widget _buildTopBar(BuildContext context) {
-    return SizedBox(
-      height: 54,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
+    return Scaffold(
+      backgroundColor: GSWColors.backgroundPrimary,
+      body: SafeArea(
+        child: Column(
           children: [
-            _buildBackButton(context),
+            LegalDocTopBar(onReadArabic: _handleReadArabic),
 
-            const Spacer(),
-
-            TextButton(
-              onPressed: _handleReadArabic,
-              style: TextButton.styleFrom(
-                foregroundColor: GSWColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              child: Text(
-                'Read in Arabic',
-                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
+            Expanded(
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  padding: kLegalContentPadding,
+                  child: content,
+                ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortVersionCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'THE SHORT VERSION',
-            style: GSWTextStyles.labelSmall.copyWith(
-              color: GSWColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          _summaryItem(
-            'Trainers are independent professionals. Your coaching agreement is with them. We find and check them, and run your booking.',
-          ),
-          _summaryItem(
-            'You pay the trainer\'s rate plus a 5% service fee. The fee is kept if you cancel, reschedule late or don\'t turn up.',
-          ),
-          _summaryItem(
-            'Cancel 24 hours or more before and you get the session rate back. Less than 24 hours, half. No-show, nothing.',
-          ),
-          _summaryItem(
-            'If your trainer cancels or doesn\'t turn up, you get everything back, or a new time, or another trainer.',
-          ),
-          _summaryItem('You must be 18 or over, and you need WhatsApp to sign in.'),
-          _summaryItem('Sessions you arrange with a trainer outside the app aren\'t covered.'),
-
-          const SizedBox(height: 8),
-
-          Text(
-            'A summary to help you. The full terms below are what apply.',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 11),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 1.45),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchField() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: TextField(
-        controller: _searchController,
-        cursorColor: GSWColors.primary,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search the terms',
-          hintStyle: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          prefixIcon: const Icon(Icons.search_rounded, color: GSWColors.textSecondary, size: 20),
-          suffixIcon: _searchQuery.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                  icon: const Icon(Icons.close_rounded, color: GSWColors.textSecondary, size: 18),
-                ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 13),
         ),
       ),
     );
   }
 
   Widget _buildSection(int index, _LegalSection section) {
-    final expanded = _expandedSections.contains(index);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => _toggleSection(index),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    section.number,
-                    style: GSWTextStyles.titleSmall.copyWith(
-                      color: GSWColors.primary,
-                      fontFamily: 'BebasNeue',
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      section.title,
-                      style: GSWTextStyles.labelLarge.copyWith(
-                        color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Icon(
-                  expanded ? Icons.remove_rounded : Icons.add_rounded,
-                  size: 20,
-                  color: GSWColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-
-          if (expanded) ...[
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final paragraph in section.paragraphs) _paragraph(paragraph),
-
-                  if (section.bullets.isNotEmpty)
-                    for (final bullet in section.bullets) _bullet(bullet),
-
-                  for (final paragraph in section.trailingParagraphs) _paragraph(paragraph),
-
-                  if (section.trailingBullets.isNotEmpty)
-                    for (final bullet in section.trailingBullets) _bullet(bullet),
-
-                  for (final paragraph in section.finalParagraphs) _paragraph(paragraph),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _paragraph(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Text(
-        text,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-      ),
-    );
-  }
-
-  Widget _bullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooterLink({required String label, required VoidCallback onTap}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-                ),
-              ),
-
-              const Icon(Icons.chevron_right_rounded, color: GSWColors.textSecondary, size: 26),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _footerDivider() {
-    return const Divider(height: 1, color: GSWColors.borderSecondary);
-  }
-
-  Widget _buildFooter() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return LegalAccordionSection(
+      number: section.number,
+      title: section.title,
+      expanded: _expandedSections.contains(index),
+      onTap: () => _toggleSection(index),
       children: [
-        Text(
-          'READ WITH THESE',
-          style: GSWTextStyles.labelMedium.copyWith(
-            color: GSWColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        _buildFooterLink(
-          label: 'Privacy Policy',
-          onTap: () {
-            context.push(GSWRoutes.privacyPolicy);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Cancellation and Refunds Policy',
-          onTap: () {
-            context.push(GSWRoutes.cancellationAndRefund);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Prohibited Services Policy',
-          onTap: () {
-            context.push(GSWRoutes.prohibitedServices);
-          },
-        ),
-        _footerDivider(),
-
-        const SizedBox(height: 24),
-
-        Text(
-          'Questions about these terms?',
-          style: GSWTextStyles.labelLarge.copyWith(
-            color: GSWColors.textPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          'info@getsetwell.com · WhatsApp +971 50 525 1393',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.primary),
-        ),
-        const SizedBox(height: 24),
-
-        Text(
-          'Published in Arabic and English. If the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-        ),
+        for (final paragraph in section.paragraphs) LegalParagraph(paragraph),
+        for (final bullet in section.bullets) LegalBullet(bullet),
+        for (final paragraph in section.trailingParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.trailingBullets) LegalBullet(bullet),
+        for (final paragraph in section.finalParagraphs) LegalParagraph(paragraph),
       ],
     );
   }

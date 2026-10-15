@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
-import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
+import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
+import 'package:mobile/features/sessions/data/services/sessions_service.dart';
 import 'package:mobile/features/sessions/presentation/screens/session_confirmation_flow.dart';
+import 'package:mobile/features/sessions/presentation/widgets/session_ui.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// 10.1 Booking detail. Also shows the cancelled, completed, reported and
+/// awaiting-confirmation states of the same booking.
 class SessionDetailsScreen extends StatefulWidget {
   const SessionDetailsScreen({super.key, required this.sessionId, this.openFeedback = false});
 
@@ -24,478 +30,443 @@ class SessionDetailsScreen extends StatefulWidget {
 class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
   final SupabaseClient _client = Supabase.instance.client;
 
+  late final SessionsService _service = SessionsService(_client);
+
+  late Future<Map<String, dynamic>> _sessionFuture;
+
   bool _feedbackPromptScheduled = false;
 
-  late Future<_SessionDetailsData> _sessionFuture;
-
-  final bool _isCancelling = false;
-
-  static const Duration _sessionDuration = Duration(hours: 1);
-
-  static const Duration _freeChangeWindow = Duration(hours: 24);
+  /// Guards Move, Cancel, View profile and the feedback flow against double taps.
+  bool _isBusy = false;
 
   @override
   void initState() {
     super.initState();
-
-    _sessionFuture = _loadSession();
-  }
-
-  // ---------------------------------------------------------------------------
-  // DATA
-  // ---------------------------------------------------------------------------
-  Future<_SessionDetailsData> _loadSession() async {
-    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
-
-    if (widget.sessionId.trim().isEmpty) {
-      throw Exception('Missing session ID.');
-    }
-
-    final sessionRow = await _client
-        .from('sessions')
-        .select('''
-          id,
-          booking_request_id,
-          trainer_id,
-          scheduled_at,
-          location_label,
-          status,
-          customer_training_place,
-          venue_choice,
-          goal,
-          notes,
-          completion_prompt_shown_at,
-          customer_outcome,
-          customer_feedback_category,
-          customer_feedback_note,
-          customer_confirmed_at,
-          trainers(
-            id,
-            full_name,
-            profile_image_url,
-            price_per_session
-          )
-        ''')
-        .eq('id', widget.sessionId)
-        .eq('user_id', customerId)
-        .single();
-
-    final session = Map<String, dynamic>.from(sessionRow);
-
-    final bookingRequestId = session['booking_request_id']?.toString().trim();
-
-    Map<String, dynamic>? request;
-
-    if (bookingRequestId != null && bookingRequestId.isNotEmpty) {
-      final requestRow = await _client
-          .from('booking_requests')
-          .select('''
-            id,
-            reference_code,
-            request_type,
-            status,
-            goal,
-            message,
-            trainer_id,
-            created_at
-          ''')
-          .eq('id', bookingRequestId)
-          .eq('user_id', customerId)
-          .maybeSingle();
-
-      if (requestRow != null) {
-        request = Map<String, dynamic>.from(requestRow);
-      }
-    }
-
-    final trainerId = session['trainer_id']?.toString().trim() ?? '';
-
-    Trainer? trainer;
-
-    if (trainerId.isNotEmpty) {
-      final repository = TrainerRepository(_client);
-
-      final trainers = await repository.getTrainers();
-
-      for (final item in trainers) {
-        if (item.id == trainerId) {
-          trainer = item;
-
-          break;
-        }
-      }
-    }
-
-    final trainerRelationship = session['trainers'];
-
-    final relationshipMap = trainerRelationship is Map
-        ? Map<String, dynamic>.from(trainerRelationship)
-        : <String, dynamic>{};
-
-    return _SessionDetailsData(
-      session: session,
-
-      request: request,
-
-      trainer: trainer,
-
-      trainerRelationship: relationshipMap,
-    );
+    _sessionFuture = _service.getSession(widget.sessionId);
   }
 
   Future<void> _reload() async {
-    setState(() {
-      _sessionFuture = _loadSession();
-    });
-
-    await _sessionFuture;
+    if (!mounted) return;
+    final future = _service.getSession(widget.sessionId);
+    setState(() => _sessionFuture = future);
+    try {
+      await future;
+    } catch (_) {
+      // The FutureBuilder shows the error state.
+    }
   }
 
-  bool _canOpenFeedback(Map<String, dynamic> session) {
-    final status = session['status']?.toString().trim().toLowerCase() ?? '';
-
-    if (status != 'confirmed' && status != 'booked') {
-      return false;
+  Future<void> _guarded(Future<void> Function() action) async {
+    if (_isBusy) return;
+    setState(() => _isBusy = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
     }
-
-    final outcome = session['customer_outcome']?.toString().trim() ?? '';
-
-    if (outcome.isNotEmpty) {
-      return false;
-    }
-
-    final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
-
-    if (scheduledAt == null) {
-      return false;
-    }
-
-    final sessionEnd = scheduledAt.toUtc().add(const Duration(hours: 1));
-
-    final now = DateTime.now().toUtc();
-
-    return !now.isBefore(sessionEnd) && now.isBefore(sessionEnd.add(const Duration(hours: 24)));
   }
 
   // ---------------------------------------------------------------------------
-  // NAVIGATION
+  // Actions
   // ---------------------------------------------------------------------------
+
   void _goBack() {
     if (context.canPop()) {
       context.pop();
-
       return;
     }
-
     context.go(GSWRoutes.sessions);
   }
 
-  void _openTrainer(_SessionDetailsData data) {
-    final trainer = data.trainer;
+  Future<void> _move() => _guarded(() async {
+        await context.push<bool>(GSWRoutes.moveSession, extra: widget.sessionId);
+        await _reload();
+      });
 
-    if (trainer == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Trainer profile could not be loaded.')));
+  Future<void> _cancel() => _guarded(() async {
+        await context.push<bool>(GSWRoutes.cancelSession, extra: widget.sessionId);
+        await _reload();
+      });
 
+  Future<void> _openTrainer(Map<String, dynamic> session) => _guarded(() async {
+        final trainerId = session['trainer_id']?.toString().trim() ?? '';
+        Trainer? trainer;
+        try {
+          final trainers = await TrainerRepository(_client).getTrainers();
+          for (final item in trainers) {
+            if (item.id == trainerId) {
+              trainer = item;
+              break;
+            }
+          }
+        } catch (error) {
+          debugPrint('Trainer load failed: $error');
+        }
+
+        if (!mounted) return;
+
+        if (trainer == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("We couldn't open this trainer's profile.")),
+          );
+          return;
+        }
+
+        await context.push(GSWRoutes.trainerProfile, extra: trainer);
+      });
+
+  Future<void> _openFeedback(Map<String, dynamic> session) => _guarded(() async {
+        try {
+          await _client.rpc(
+            'mark_session_completion_prompt_shown',
+            params: {'p_session_id': widget.sessionId},
+          );
+        } catch (error) {
+          debugPrint('mark_session_completion_prompt_shown failed: $error');
+        }
+
+        if (!mounted) return;
+
+        await showSessionConfirmationFlow(
+          context: context,
+          session: session,
+          onBookAgain: _startRepeatBooking,
+          onFinished: _reload,
+        );
+      });
+
+  /// Same repeat booking as the Sessions tab: reopen this trainer's booking
+  /// request prefilled from the session.
+  Future<void> _startRepeatBooking(Map<String, dynamic> session) async {
+    final trainerId = session['trainer_id']?.toString().trim() ?? '';
+    if (trainerId.isEmpty) {
+      _showRepeatBookingError();
       return;
     }
 
-    context.push(GSWRoutes.trainerProfile, extra: trainer);
+    try {
+      final trainers = await TrainerRepository(_client).getTrainers();
+
+      Trainer? selected;
+      for (final trainer in trainers) {
+        if (trainer.id == trainerId) {
+          selected = trainer;
+          break;
+        }
+      }
+
+      if (!mounted) return;
+
+      if (selected == null) {
+        _showRepeatBookingError();
+        return;
+      }
+
+      final request = session['booking_requests'];
+      final requestMap = request is Map ? request : const {};
+
+      String? firstNonEmpty(Object? a, Object? b) {
+        final first = a?.toString().trim() ?? '';
+        if (first.isNotEmpty) return first;
+        final second = b?.toString().trim() ?? '';
+        return second.isEmpty ? null : second;
+      }
+
+      await context.push(
+        GSWRoutes.bookingRequest,
+        extra: BookingRequestRouteData(
+          trainer: selected,
+          initialGoal: firstNonEmpty(session['goal'], requestMap['goal']),
+          initialTrainingPlace: BookingRequestRouteData.trainingPlaceFromDb(
+            session['customer_training_place'],
+          ),
+          initialVenueChoice: BookingRequestRouteData.venueChoiceFromDb(session['venue_choice']),
+          initialLocationLabel: session['location_label']?.toString().trim(),
+          initialNotes: firstNonEmpty(session['notes'], requestMap['message']),
+          isRepeatBooking: true,
+        ),
+      );
+    } catch (error) {
+      debugPrint('Could not start repeat booking: $error');
+      _showRepeatBookingError();
+    }
+  }
+
+  void _showRepeatBookingError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text("We could not open this trainer's availability. Please try again."),
+        ),
+      );
+  }
+
+  void _showReceiptPending() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your receipt will be available here once card payments are live.'),
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
-  // BUILD
+  // Build
   // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
-
       body: SafeArea(
-        child: FutureBuilder<_SessionDetailsData>(
+        child: FutureBuilder<Map<String, dynamic>>(
           future: _sessionFuture,
-
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator(color: GSWColors.primary));
             }
 
             if (snapshot.hasError || snapshot.data == null) {
-              debugPrint(
-                'Session details load failed: '
-                '${snapshot.error}',
-              );
-
+              debugPrint('Session details load failed: ${snapshot.error}');
               return _buildErrorState();
             }
 
-            final data = snapshot.data!;
+            final session = snapshot.data!;
 
-            if (widget.openFeedback &&
-                !_feedbackPromptScheduled &&
-                _canOpenFeedback(data.session)) {
+            if (widget.openFeedback && !_feedbackPromptScheduled && sessionNeedsConfirmation(session)) {
               _feedbackPromptScheduled = true;
-
-              WidgetsBinding.instance.addPostFrameCallback((_) async {
-                if (!mounted) return;
-
-                try {
-                  await _client.rpc(
-                    'mark_session_completion_prompt_shown',
-
-                    params: {'p_session_id': widget.sessionId},
-                  );
-
-                  if (!context.mounted) return;
-
-                  await showSessionConfirmationFlow(
-                    context: context,
-
-                    session: data.session,
-
-                    onBookAgain: (_) async {
-                      if (!mounted) return;
-
-                      context.go(GSWRoutes.sessions);
-                    },
-
-                    onFinished: () async {
-                      if (!mounted) return;
-
-                      await _reload();
-                    },
-                  );
-                } catch (error) {
-                  debugPrint('Feedback notification flow failed: $error');
-                }
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _openFeedback(session);
               });
             }
 
-            return _buildContent(data);
+            return _buildContent(session);
           },
         ),
       ),
     );
   }
 
-  Widget _buildContent(_SessionDetailsData data) {
-    final scheduledAt = data.scheduledAt;
+  Widget _buildContent(Map<String, dynamic> session) {
+    final start = sessionStartDubai(session);
+    if (start == null) return _buildErrorState();
 
-    if (scheduledAt == null) {
-      return _buildErrorState();
-    }
-
-    final end = scheduledAt.add(_sessionDuration);
-
-    final isCancelled = data.isCancelled;
-
-    final isCompleted = data.isCompleted;
-
-    final isUpcoming = scheduledAt.isAfter(_nowDubai());
-
-    final statusLabel = isCancelled
-        ? 'Cancelled'
-        : isCompleted
-        ? 'Completed'
-        : 'Confirmed';
+    final view = _DetailView(session, start);
 
     return Column(
       children: [
         Expanded(
-          child: ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-
-                children: [
-                  _buildBackButton(),
-
-                  const SizedBox(height: 34),
-
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SessionBackButton(onTap: _goBack),
+                const SizedBox(height: 24),
+                Text(
+                  'Your session',
+                  style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    if (view.referenceCode != null) ...[
+                      Text(
+                        view.referenceCode!,
+                        style: GSWTextStyles.bodyMedium.copyWith(
+                          fontSize: 13,
+                          height: 18 / 13,
+                          fontWeight: FontWeight.w500,
+                          color: GSWColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    _StatusChip(label: view.statusLabel, muted: view.isCancelled),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                _buildTrainerCard(session, view.trainer),
+                const SizedBox(height: 24),
+                _buildDetailCard(session, view),
+                const SizedBox(height: 24),
+                if (view.isCancelled)
+                  _buildCancelledCard(session, view)
+                else
+                  _buildPaymentCard(session, view),
+                if (view.policyHint != null) ...[
+                  const SizedBox(height: 24),
                   Text(
-                    'Your session',
-
-                    style: GSWTextStyles.titleLarge.copyWith(
-                      color: GSWColors.textPrimary,
-
-                      height: 1.25,
+                    view.policyHint!,
+                    textAlign: TextAlign.center,
+                    style: GSWTextStyles.bodySmall.copyWith(
+                      color: GSWColors.textTertiary,
+                      height: 16 / 12,
                     ),
                   ),
-
-                  const SizedBox(height: 10),
-
-                  Wrap(
-                    spacing: 12,
-
-                    runSpacing: 8,
-
-                    crossAxisAlignment: WrapCrossAlignment.center,
-
-                    children: [
-                      Text(
-                        data.referenceCode,
-
-                        style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
-                      ),
-
-                      _buildStatusPill(statusLabel, highlighted: !isCancelled),
-                    ],
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  _buildTrainerCard(data),
-
-                  const SizedBox(height: 24),
-
-                  _buildSessionInformation(data, scheduledAt, end),
-
-                  const SizedBox(height: 24),
-
-                  _buildPaymentCard(data),
-
-                  if (isCancelled) ...[const SizedBox(height: 26), _buildCancelledCard(data)],
-
-                  const SizedBox(height: 24),
-
-                  if (!isCancelled && !isCompleted && isUpcoming) _buildInlinePolicyHint(data),
-
-                  const SizedBox(height: 24),
                 ],
-              ),
+              ],
             ),
           ),
         ),
-
-        if (!isCancelled && !isCompleted && isUpcoming) _buildBottomActions(data),
+        if (view.canManage) _buildManageBar(view),
+        if (view.awaitingAnswer) _buildFeedbackBar(session),
       ],
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // HEADER
-  // ---------------------------------------------------------------------------
-  Widget _buildBackButton() {
-    return InkWell(
-      onTap: _goBack,
-
-      borderRadius: BorderRadius.circular(999),
-
-      child: Container(
-        width: 46,
-
-        height: 46,
-
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-
-          border: Border.all(color: GSWColors.neutral700),
-        ),
-
-        alignment: Alignment.center,
-
-        child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 34),
-      ),
-    );
-  }
-
-  Widget _buildStatusPill(String label, {bool highlighted = false}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-
-      decoration: BoxDecoration(
-        color: highlighted ? GSWColors.surfaceInteractive : GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(999),
-      ),
-
-      child: Text(
-        label,
-
-        style: GSWTextStyles.labelSmall.copyWith(
-          color: highlighted ? GSWColors.textPrimary : GSWColors.textSecondary,
-
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // TRAINER CARD
-  // ---------------------------------------------------------------------------
-  Widget _buildTrainerCard(_SessionDetailsData data) {
-    final imageUrl = data.profileImageUrl;
-
+  Widget _card({required Widget child, EdgeInsetsGeometry padding = const EdgeInsets.all(16)}) {
     return Container(
       width: double.infinity,
-
-      padding: const EdgeInsets.all(18),
-
+      padding: padding,
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
+      child: child,
+    );
+  }
 
+  Widget _buildTrainerCard(Map<String, dynamic> session, SessionTrainerInfo trainer) {
+    return _card(
       child: Row(
         children: [
-          _buildTrainerAvatar(data.trainerName, imageUrl),
-
-          const SizedBox(width: 16),
-
+          SessionTrainerAvatar(name: trainer.name, imagePath: trainer.imagePath, size: 48),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-
               children: [
                 Text(
-                  data.trainerName,
-
+                  trainer.name,
                   maxLines: 1,
-
                   overflow: TextOverflow.ellipsis,
-
-                  style: GSWTextStyles.labelLarge.copyWith(
+                  style: GSWTextStyles.titleExtraSmall.copyWith(
                     color: GSWColors.textPrimary,
-
                     fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                    height: 22 / 16,
                   ),
                 ),
-
                 const SizedBox(height: 2),
-
                 Text(
-                  data.specialty,
-
+                  trainer.serviceLabel,
                   maxLines: 1,
-
                   overflow: TextOverflow.ellipsis,
-
-                  style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    fontSize: 13,
+                    height: 18 / 13,
+                    color: GSWColors.textSecondary,
+                  ),
                 ),
               ],
             ),
           ),
-
           const SizedBox(width: 12),
+          SizedBox(
+            height: 40,
+            child: GSWButton(
+              label: 'View profile',
+              onPressed: _isBusy ? null : () => _openTrainer(session),
+              variant: GSWButtonVariant.secondary,
+              size: GSWButtonSize.medium,
+              fullWidth: false,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-          TextButton(
-            onPressed: () => _openTrainer(data),
+  Widget _buildDetailCard(Map<String, dynamic> session, _DetailView view) {
+    final location = session['location_label']?.toString().trim() ?? '';
+    final goal = view.goal;
+    final note = view.note;
 
+    final rows = <Widget>[
+      _kv('When', '${GSWTime.dayShort(view.start)}, ${GSWTime.timeRange(view.start, kSessionLength)}'),
+      _kv('Where', location.isEmpty ? 'Confirmed with your trainer' : location),
+      if (goal != null) _kv('Goal', goal),
+      if (note != null) _kv('Note', note),
+    ];
+
+    return _card(
+      child: Column(
+        children: [
+          for (var index = 0; index < rows.length; index++) ...[
+            if (index > 0) const SizedBox(height: 10),
+            rows[index],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String label, String value, {bool highlighted = false, bool bold = false}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GSWTextStyles.bodyMedium.copyWith(height: 20 / 14, color: GSWColors.textSecondary),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: GSWTextStyles.labelMedium.copyWith(
+              height: 20 / 14,
+              color: highlighted ? GSWColors.textAccent : GSWColors.textPrimary,
+              fontWeight: bold ? FontWeight.w600 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPaymentCard(Map<String, dynamic> session, _DetailView view) {
+    final amounts = view.amounts;
+    final paidOn = GSWTime.parseToDubai(session['created_at']);
+
+    return _card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Payment',
+            style: GSWTextStyles.labelLarge.copyWith(
+              color: GSWColors.textPrimary,
+              height: 20 / 16,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _kv('Session, 60 minutes', _fixed(amounts.sessionRate)),
+          const SizedBox(height: 10),
+          _kv('Service fee (5%)', _fixed(amounts.serviceFee)),
+          const SizedBox(height: 10),
+          const Divider(height: 1, thickness: 1, color: GSWColors.surfaceInteractive),
+          const SizedBox(height: 10),
+          _kv('Total paid', _fixed(amounts.total), highlighted: true),
+          if (paidOn != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Paid ${GSWTime.dayLong(paidOn).split(' ').skip(1).join(' ')} by card',
+              style: GSWTextStyles.bodySmall.copyWith(height: 16 / 12, color: GSWColors.textTertiary),
+            ),
+          ],
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: _showReceiptPending,
             child: Text(
-              'View profile',
-
-              style: GSWTextStyles.bodySmall.copyWith(
-                color: GSWColors.primary,
-
+              'View receipt',
+              style: GSWTextStyles.bodyMedium.copyWith(
+                fontSize: 13,
+                height: 18 / 13,
+                color: GSWColors.textAccent,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -505,195 +476,45 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
     );
   }
 
-  Widget _buildTrainerAvatar(String name, String? imageUrl) {
-    if (imageUrl != null && imageUrl.trim().isNotEmpty) {
-      return ClipOval(
-        child: Image.network(
-          imageUrl,
+  /// Cancelled state: shows the refund stored when the session was cancelled
+  /// and the amounts actually paid, never a figure recomputed from today.
+  Widget _buildCancelledCard(Map<String, dynamic> session, _DetailView view) {
+    final refund = GSWMoney.parse(session['cancellation_refund_amount']);
+    final cancelledAt = GSWTime.parseToDubai(session['cancelled_at']);
 
-          width: 48,
-
-          height: 48,
-
-          fit: BoxFit.cover,
-
-          alignment: const Alignment(0, -0.8),
-
-          errorBuilder: (context, error, stackTrace) {
-            return _buildAvatarFallback(name);
-          },
-        ),
-      );
-    }
-
-    return _buildAvatarFallback(name);
-  }
-
-  Widget _buildAvatarFallback(String name) {
-    final trimmed = name.trim();
-
-    final initial = trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
-
-    return Container(
-      width: 48,
-
-      height: 48,
-
-      decoration: const BoxDecoration(color: GSWColors.surfaceInteractive, shape: BoxShape.circle),
-
-      alignment: Alignment.center,
-
-      child: Text(initial, style: GSWTextStyles.titleMedium.copyWith(color: GSWColors.textPrimary)),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // SESSION INFORMATION
-  // ---------------------------------------------------------------------------
-  Widget _buildSessionInformation(_SessionDetailsData data, DateTime start, DateTime end) {
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
-
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
-      ),
-
-      child: Column(
-        children: [
-          _detailRow(
-            'When',
-
-            '${_dateLabel(start)}, '
-                '${_timeLabel(start)} to ${_timeLabel(end)}',
-          ),
-
-          const SizedBox(height: 10),
-
-          _detailRow(
-            'Where',
-
-            data.locationLabel.isEmpty ? 'Location confirmed with trainer' : data.locationLabel,
-          ),
-
-          if (data.goal.isNotEmpty) ...[
-            const SizedBox(height: 10),
-
-            _detailRow('Goal', _goalLabel(data.goal)),
-          ],
-
-          if (data.note.isNotEmpty) ...[const SizedBox(height: 10), _detailRow('Note', data.note)],
-        ],
-      ),
-    );
-  }
-
-  Widget _detailRow(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-
-      children: [
-        SizedBox(
-          width: 82,
-
-          child: Text(
-            label,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-        ),
-
-        const SizedBox(width: 10),
-
-        Expanded(
-          child: Text(
-            value,
-
-            textAlign: TextAlign.right,
-
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // PAYMENT
-  // ---------------------------------------------------------------------------
-  Widget _buildPaymentCard(_SessionDetailsData data) {
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 22),
-
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
-      ),
-
+    return _card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-
         children: [
-          Text('Payment', style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textPrimary)),
-
-          const SizedBox(height: 10),
-
-          _moneyRow('Session, 60 minutes', data.sessionRate),
-
-          const SizedBox(height: 10),
-
-          _moneyRow('Service fee (5%)', data.serviceFee),
-
-          const SizedBox(height: 10),
-
-          Container(width: double.infinity, height: 1, color: GSWColors.neutral700),
-
-          const SizedBox(height: 10),
-
-          _moneyRow('Total paid', data.total, highlighted: true),
-
-          const SizedBox(height: 10),
-
           Text(
-            _paymentSummary(data),
-
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-          ),
-
-          const SizedBox(height: 10),
-
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: EdgeInsets.zero,
-
-              minimumSize: Size.zero,
-
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            'Cancelled',
+            style: GSWTextStyles.labelLarge.copyWith(
+              color: GSWColors.textPrimary,
+              height: 20 / 16,
             ),
-
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Receipt storage will connect to the payment provider receipt once payments are live.',
-                  ),
-                ),
-              );
-            },
-
+          ),
+          const SizedBox(height: 10),
+          _kv('Total paid', _fixed(view.amounts.total)),
+          const SizedBox(height: 10),
+          _kv('Refunded', refund == null ? 'Being confirmed' : _fixed(refund), highlighted: true),
+          const SizedBox(height: 10),
+          Text(
+            [
+              if (cancelledAt != null) 'Cancelled ${GSWTime.dayAndTime(cancelledAt)}.',
+              'Refunds reach the card you paid with in 5 to 10 working days.',
+            ].join(' '),
+            style: GSWTextStyles.bodySmall.copyWith(height: 16 / 12, color: GSWColors.textTertiary),
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: _showReceiptPending,
             child: Text(
               'View receipt',
-
               style: GSWTextStyles.bodyMedium.copyWith(
-                color: GSWColors.primary,
-
-                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                height: 18 / 13,
+                color: GSWColors.textAccent,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
@@ -702,647 +523,189 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
     );
   }
 
-  Widget _moneyRow(String label, double amount, {bool highlighted = false}) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          ),
-        ),
-
-        const SizedBox(width: 16),
-
-        Text(
-          _money(amount),
-
-          style: GSWTextStyles.labelMedium.copyWith(
-            color: highlighted ? GSWColors.primary : GSWColors.textPrimary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // CANCELLED STATE
-  // ---------------------------------------------------------------------------
-  Widget _buildCancelledCard(_SessionDetailsData data) {
-    final calculation = _cancellationCalculation(data);
-
-    return Container(
-      width: double.infinity,
-
-      padding: const EdgeInsets.all(16),
-
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-
-        borderRadius: BorderRadius.circular(16),
-      ),
-
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'What was cancelled',
-
-                  style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textSecondary),
-                ),
-              ),
-
-              Text(
-                data.referenceCode,
-
-                style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-
-          Divider(height: 1, color: GSWColors.neutral700),
-
-          const SizedBox(height: 10),
-
-          Text(
-            data.trainerName,
-
-            style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
-          ),
-
-          const SizedBox(height: 10),
-
-          if (data.scheduledAt != null)
-            Text(
-              '${_longDateLabel(data.scheduledAt!)}, '
-              '${_timeLabel(data.scheduledAt!)} to '
-              '${_timeLabel(data.scheduledAt!.add(_sessionDuration))}',
-
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-            ),
-
-          const SizedBox(height: 10),
-
-          if (data.locationLabel.isNotEmpty)
-            Text(
-              data.locationLabel,
-
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-            ),
-
-          const SizedBox(height: 10),
-
-          Text(
-            '${_money(calculation.refundAmount)} refunded of ${_money(data.total)} paid',
-
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // BOTTOM ACTIONS
-  // ---------------------------------------------------------------------------
-  Widget _buildBottomActions(_SessionDetailsData data) {
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-
-      color: GSWColors.backgroundPrimary,
-
+  /// Bottom bar 819:3167: 16 top, 28 bottom, 12 gap; Move above a full-width
+  /// Medium 14 secondary "Cancel booking" line (note 819:3174).
+  Widget _buildManageBar(_DetailView view) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-
         children: [
           GSWButton(
-            size: GSWButtonSize.large,
-
-            variant: GSWButtonVariant.primary,
-
             label: 'Move this session',
-
-            onPressed: () async {
-              final moved = await context.push<bool>(
-                GSWRoutes.moveSession,
-
-                extra: widget.sessionId,
-              );
-
-              if (!mounted) return;
-
-              if (moved == true) {
-                setState(() {
-                  _sessionFuture = _loadSession();
-                });
-              }
-            },
+            onPressed: _isBusy ? null : _move,
           ),
-
-          const SizedBox(height: 8),
-
-          TextButton(
-            onPressed: _isCancelling
-                ? null
-                : () async {
-                    final cancelled = await context.push<bool>(
-                      GSWRoutes.cancelSession,
-
-                      extra: widget.sessionId,
-                    );
-
-                    if (!mounted) return;
-
-                    if (cancelled == true) {
-                      setState(() {
-                        _sessionFuture = _loadSession();
-                      });
-                    }
-                  },
-
-            child: _isCancelling
-                ? const SizedBox(
-                    width: 18,
-
-                    height: 18,
-
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-
-                      color: GSWColors.textSecondary,
-                    ),
-                  )
-                : Text(
-                    'Cancel booking',
-
-                    style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-                  ),
+          const SizedBox(height: 12),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _isBusy ? null : _cancel,
+            child: SizedBox(
+              width: double.infinity,
+              child: Text(
+                'Cancel booking',
+                textAlign: TextAlign.center,
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  height: 20 / 14,
+                  color: GSWColors.textSecondary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildInlinePolicyHint(_SessionDetailsData data) {
-    final calculation = _cancellationCalculation(data);
-
-    return Center(
-      child: Text(
-        calculation.shortMessage,
-
-        textAlign: TextAlign.center,
-
-        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.45),
+  Widget _buildFeedbackBar(Map<String, dynamic> session) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+      child: GSWButton(
+        label: 'Tell us if it took place',
+        onPressed: _isBusy ? null : () => _openFeedback(session),
       ),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // ERROR
-  // ---------------------------------------------------------------------------
   Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SessionBackButton(onTap: _goBack),
+          const Spacer(),
+          Text(
+            "We couldn't load this session",
+            style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Check your connection and try again.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          ),
+          const Spacer(),
+          GSWButton(label: 'Try again', onPressed: _reload),
+          const SizedBox(height: 8),
+          GSWButton(
+            label: 'Back to my sessions',
+            variant: GSWButtonVariant.tertiary,
+            onPressed: () => context.go(GSWRoutes.sessions),
+          ),
+        ],
+      ),
+    );
+  }
 
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+  /// Payment card amounts are shown with two decimals, as in Figma.
+  String _fixed(double? value) => value == null ? '–' : 'AED ${value.toStringAsFixed(2)}';
+}
 
-          children: [
-            Text(
-              'Could not load this session.',
+// =============================================================================
+// View model
+// =============================================================================
 
-              textAlign: TextAlign.center,
+class _DetailView {
+  _DetailView(this.session, this.start)
+      : trainer = SessionTrainerInfo.fromSession(session),
+        amounts = SessionAmounts.fromSession(session);
 
-              style: GSWTextStyles.titleMedium.copyWith(color: GSWColors.textPrimary),
-            ),
+  final Map<String, dynamic> session;
+  final DateTime start;
+  final SessionTrainerInfo trainer;
+  final SessionAmounts amounts;
 
-            const SizedBox(height: 8),
+  Map<String, dynamic> get _request {
+    final value = session['booking_requests'];
+    return value is Map ? Map<String, dynamic>.from(value) : const {};
+  }
 
-            Text(
-              'Please try again.',
+  String? get referenceCode {
+    final value = _request['reference_code']?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
 
-              textAlign: TextAlign.center,
+  String? _firstText(Object? a, Object? b) {
+    final first = a?.toString().trim() ?? '';
+    if (first.isNotEmpty) return first;
+    final second = b?.toString().trim() ?? '';
+    return second.isEmpty ? null : second;
+  }
 
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
+  String? get goal {
+    final value = _firstText(session['goal'], _request['goal']);
+    return value == null ? null : GSWPronoun.capitalise(value.replaceAll('_', ' '));
+  }
 
-            const SizedBox(height: 24),
+  String? get note => _firstText(session['notes'], _request['message']);
 
-            GSWButton(
-              size: GSWButtonSize.large,
+  String get status => sessionStatus(session);
 
-              variant: GSWButtonVariant.primary,
+  bool get isCancelled => sessionIsCancelled(session);
 
-              label: 'Try again',
+  bool get isActive => kActiveSessionStatuses.contains(status);
 
-              onPressed: _reload,
-            ),
+  DateTime get _now => GSWTime.nowDubai();
 
-            const SizedBox(height: 12),
+  bool get hasStarted => !start.isAfter(_now);
 
-            TextButton(
-              onPressed: _goBack,
+  bool get hasEnded => !start.add(kSessionLength).isAfter(_now);
 
-              child: Text(
-                'Go back',
+  /// Move and Cancel are offered only for a booked session that has not started.
+  bool get canManage => isActive && !hasStarted;
 
-                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-              ),
-            ),
-          ],
+  bool get awaitingAnswer => sessionNeedsConfirmation(session);
+
+  String get statusLabel {
+    if (isCancelled) return 'Cancelled';
+    if (status == 'reported') return 'Reported';
+    if (status == 'completed') return 'Completed';
+    if (isActive && hasEnded) return 'Awaiting confirmation';
+    if (isActive && hasStarted) return 'Happening now';
+    return 'Confirmed';
+  }
+
+  /// The line under the payment card for a booking that can still be cancelled.
+  String? get policyHint {
+    if (!canManage) return null;
+
+    final remaining = start.difference(_now);
+
+    if (remaining >= const Duration(hours: 24)) {
+      final cutoff = start.subtract(const Duration(hours: 24));
+      return amounts.sessionRate == null
+          ? 'Cancel before ${GSWTime.dayAndTime(cutoff)} to get the full session fee back'
+          : 'Cancel before ${GSWTime.dayAndTime(cutoff)} to get the full ${GSWMoney.aed(amounts.sessionRate)} session fee back';
+    }
+
+    return amounts.halfRate == null
+        ? 'Inside 24 hours: cancelling now returns half the session fee'
+        : 'Inside 24 hours: cancelling now returns ${GSWMoney.aed(amounts.halfRate)}, half the session fee';
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.label, this.muted = false});
+
+  final String label;
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: muted ? GSWColors.surfacePrimary : GSWColors.surfaceInteractive,
+        borderRadius: BorderRadius.circular(GSWRadius.full),
+      ),
+      child: Text(
+        label,
+        style: GSWTextStyles.bodySmall.copyWith(
+          height: 14 / 12,
+          fontWeight: FontWeight.w500,
+          color: muted ? GSWColors.textSecondary : GSWColors.textPrimary,
         ),
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // CANCELLATION CALCULATION
-  // ---------------------------------------------------------------------------
-  _CancellationCalculation _cancellationCalculation(_SessionDetailsData data) {
-    final scheduledAt = data.scheduledAt;
-
-    if (scheduledAt == null) {
-      return const _CancellationCalculation(
-        refundAmount: 0,
-
-        description: 'We could not calculate the refund for this booking.',
-
-        shortMessage: '',
-
-        longMessage: '',
-      );
-    }
-
-    final now = _nowDubai();
-
-    final remaining = scheduledAt.difference(now);
-
-    if (remaining >= _freeChangeWindow) {
-      final refund = data.sessionRate;
-
-      return _CancellationCalculation(
-        refundAmount: refund,
-
-        description:
-            'You are cancelling at least 24 hours before the session. The session rate is returned. The service fee is retained.',
-
-        shortMessage:
-            'Cancel before ${_dateLabel(scheduledAt.subtract(_freeChangeWindow))}, ${_timeLabel(scheduledAt.subtract(_freeChangeWindow))} to get the ${_money(data.sessionRate)} session rate back.',
-
-        longMessage:
-            'At least 24 hours before the session, the session rate is refundable. The service fee is retained.',
-      );
-    }
-
-    if (remaining > Duration.zero) {
-      final refund = data.sessionRate * 0.5;
-
-      return _CancellationCalculation(
-        refundAmount: refund,
-
-        description:
-            'You are cancelling less than 24 hours before the session. Half of the session rate is returned. The service fee is retained.',
-
-        shortMessage:
-            'This session is less than 24 hours away. Cancelling now returns ${_money(refund)}.',
-
-        longMessage:
-            'Inside 24 hours, half of the session rate is refundable. The service fee is retained.',
-      );
-    }
-
-    return const _CancellationCalculation(
-      refundAmount: 0,
-
-      description: 'The scheduled start time has passed.',
-
-      shortMessage: '',
-
-      longMessage: '',
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // FORMATTING
-  // ---------------------------------------------------------------------------
-  DateTime _nowDubai() {
-    return DateTime.now().toUtc().add(const Duration(hours: 4));
-  }
-
-  DateTime _toDubai(DateTime value) {
-    return value.toUtc().add(const Duration(hours: 4));
-  }
-
-  String _dateLabel(DateTime value) {
-    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sept',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-
-    return '${weekdays[value.weekday - 1]} '
-        '${value.day} '
-        '${months[value.month - 1]}';
-  }
-
-  String _longDateLabel(DateTime value) {
-    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    return '${weekdays[value.weekday - 1]} '
-        '${value.day} ${months[value.month - 1]}';
-  }
-
-  String _timeLabel(DateTime value) {
-    var hour = value.hour;
-
-    final period = hour >= 12 ? 'PM' : 'AM';
-
-    hour %= 12;
-
-    if (hour == 0) {
-      hour = 12;
-    }
-
-    final minute = value.minute.toString().padLeft(2, '0');
-
-    return '$hour:$minute $period';
-  }
-
-  String _money(double value) {
-    return 'AED ${value.toStringAsFixed(2)}';
-  }
-
-  String _goalLabel(String value) {
-    final normalized = value.trim().replaceAll('_', ' ');
-
-    if (normalized.isEmpty) return '';
-
-    return '${normalized[0].toUpperCase()}'
-        '${normalized.substring(1)}';
-  }
-
-  String _paymentSummary(_SessionDetailsData data) {
-    final paymentMethod = data.paymentMethod.toLowerCase();
-
-    final method = paymentMethod.contains('apple') ? 'Apple Pay' : 'card';
-
-    final createdAt = data.requestCreatedAt;
-
-    if (createdAt == null) {
-      return 'Paid by $method';
-    }
-
-    final dubai = _toDubai(createdAt);
-
-    return 'Paid ${dubai.day} '
-        '${_shortMonth(dubai.month)} '
-        'by $method';
-  }
-
-  String _shortMonth(int month) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-
-    return months[month - 1];
-  }
-}
-
-// =============================================================================
-// DATA MODEL
-// =============================================================================
-class _SessionDetailsData {
-  const _SessionDetailsData({
-    required this.session,
-
-    required this.request,
-
-    required this.trainer,
-
-    required this.trainerRelationship,
-  });
-
-  final Map<String, dynamic> session;
-
-  final Map<String, dynamic>? request;
-
-  final Trainer? trainer;
-
-  final Map<String, dynamic> trainerRelationship;
-
-  String get bookingRequestId => session['booking_request_id']?.toString().trim() ?? '';
-
-  String get referenceCode {
-    final value = request?['reference_code']?.toString().trim();
-
-    if (value != null && value.isNotEmpty) {
-      return value;
-    }
-
-    return 'Session';
-  }
-
-  DateTime? get scheduledAt {
-    final raw = session['scheduled_at']?.toString();
-
-    if (raw == null || raw.isEmpty) {
-      return null;
-    }
-
-    final parsed = DateTime.tryParse(raw);
-
-    if (parsed == null) return null;
-
-    return parsed.toUtc().add(const Duration(hours: 4));
-  }
-
-  String get locationLabel => session['location_label']?.toString().trim() ?? '';
-
-  String get status => session['status']?.toString().trim().toLowerCase() ?? '';
-
-  bool get isCancelled => status == 'cancelled' || status == 'canceled';
-
-  bool get isCompleted => status == 'completed';
-
-  String get trainerName {
-    final fromModel = trainer?.fullName.trim();
-
-    if (fromModel != null && fromModel.isNotEmpty) {
-      return fromModel;
-    }
-
-    final relationship = trainerRelationship['full_name']?.toString().trim();
-
-    if (relationship != null && relationship.isNotEmpty) {
-      return relationship;
-    }
-
-    return 'Your trainer';
-  }
-
-  String? get profileImageUrl {
-    final fromModel = trainer?.profileImageUrl?.trim();
-
-    if (fromModel != null && fromModel.isNotEmpty) {
-      return fromModel;
-    }
-
-    final relationship = trainerRelationship['profile_image_url']?.toString().trim();
-
-    if (relationship != null && relationship.isNotEmpty) {
-      return relationship;
-    }
-
-    return null;
-  }
-
-  String get specialty {
-    final primaryService = trainer?.primaryService?.trim();
-
-    if (primaryService != null && primaryService.isNotEmpty) {
-      return primaryService;
-    }
-
-    return 'Personal training';
-  }
-
-  String get goal => request?['goal']?.toString().trim() ?? '';
-
-  String get note => request?['message']?.toString().trim() ?? '';
-
-  String get requestType => request?['request_type']?.toString().trim() ?? '';
-
-  double get sessionRate {
-    final raw = request?['session_rate'];
-
-    if (raw is num) {
-      return raw.toDouble();
-    }
-
-    final parsed = double.tryParse(raw?.toString() ?? '');
-
-    if (parsed != null) {
-      return parsed;
-    }
-
-    final trainerRate = trainer?.pricePerSession;
-
-    if (trainerRate != null) {
-      return trainerRate.toDouble();
-    }
-
-    final relationshipRate = trainerRelationship['price_per_session'];
-
-    if (relationshipRate is num) {
-      return relationshipRate.toDouble();
-    }
-
-    return double.tryParse(relationshipRate?.toString() ?? '') ?? 0;
-  }
-
-  double get serviceFee {
-    final raw = request?['service_fee'];
-
-    if (raw is num) {
-      return raw.toDouble();
-    }
-
-    final parsed = double.tryParse(raw?.toString() ?? '');
-
-    if (parsed != null) {
-      return parsed;
-    }
-
-    return sessionRate * 0.05;
-  }
-
-  double get total {
-    final raw = request?['total'];
-
-    if (raw is num) {
-      return raw.toDouble();
-    }
-
-    final parsed = double.tryParse(raw?.toString() ?? '');
-
-    if (parsed != null) {
-      return parsed;
-    }
-
-    return sessionRate + serviceFee;
-  }
-
-  String get paymentMethod => request?['payment_method']?.toString().trim() ?? 'card';
-
-  DateTime? get requestCreatedAt {
-    final raw = request?['created_at']?.toString();
-
-    if (raw == null || raw.isEmpty) {
-      return null;
-    }
-
-    return DateTime.tryParse(raw);
-  }
-}
-
-// =============================================================================
-// CANCELLATION MODEL
-// =============================================================================
-class _CancellationCalculation {
-  const _CancellationCalculation({
-    required this.refundAmount,
-    required this.description,
-    required this.shortMessage,
-    required this.longMessage,
-  });
-
-  final double refundAmount;
-  final String description;
-  final String shortMessage;
-  final String longMessage;
 }

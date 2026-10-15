@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../theme/gsw_colors.dart';
@@ -116,14 +117,14 @@ class _GSWTextFieldState extends State<GSWTextField> {
   void _handleFocusChange() {
     final hadFocus = _hasFocus;
 
+    if (!mounted || hadFocus == _focusNode.hasFocus) return;
+
     setState(() {
       _hasFocus = _focusNode.hasFocus;
     });
 
-    // Focused → tap outside / keyboard done
-    if (hadFocus && !_hasFocus && _hasValue) {
-      widget.onComplete?.call(widget.controller.text.trim());
-    }
+    // Losing focus (tapping outside, opening a picker) never submits.
+    // onComplete only fires from the keyboard action, see onSubmitted below.
   }
 
   void _removeFocus() {
@@ -193,9 +194,15 @@ class _GSWTextFieldState extends State<GSWTextField> {
               _removeFocus();
             },
 
-            // Keyboard Done also removes focus.
+            // Keyboard Done / Next removes focus and is the only path that
+            // submits, so a stray tap outside the field never sends an SMS or
+            // saves a profile.
             onEditingComplete: () {
               _removeFocus();
+            },
+            onSubmitted: (value) {
+              final trimmed = value.trim();
+              if (trimmed.isNotEmpty) widget.onComplete?.call(trimmed);
             },
 
             decoration: InputDecoration(
@@ -373,7 +380,8 @@ class _GSWTextFieldState extends State<GSWTextField> {
       case GSWTextFieldState.focused:
       case GSWTextFieldState.complete:
       case GSWTextFieldState.error:
-        return GSWColors.textSecondary;
+        // Figma: placeholder text is Text/Tertiary #82888F.
+        return GSWColors.textTertiary;
     }
   }
 
@@ -400,7 +408,7 @@ class _GSWTextFieldState extends State<GSWTextField> {
 
   OutlineInputBorder get _border {
     return OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(GSWRadius.control),
       borderSide: BorderSide(color: _borderColor, width: 1),
     );
   }

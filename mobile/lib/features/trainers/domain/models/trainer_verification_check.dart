@@ -6,6 +6,7 @@ class TrainerVerificationCheck {
     required this.checkType,
     required this.displayOrder,
     required this.isVerified,
+    this.verifiedAt,
   });
 
   final String id;
@@ -15,14 +16,20 @@ class TrainerVerificationCheck {
   final int displayOrder;
   final bool isVerified;
 
+  /// Calendar date the check was completed (a date column, no time zone).
+  final DateTime? verifiedAt;
+
   factory TrainerVerificationCheck.fromJson(Map<String, dynamic> json) {
+    final rawVerifiedAt = json['verified_at']?.toString();
+
     return TrainerVerificationCheck(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      description: json['description'] as String,
-      checkType: json['check_type'] as String,
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      checkType: json['check_type']?.toString() ?? 'other',
       displayOrder: json['display_order'] as int? ?? 999,
       isVerified: json['is_verified'] as bool? ?? false,
+      verifiedAt: rawVerifiedAt == null ? null : DateTime.tryParse(rawVerifiedAt),
     );
   }
 }

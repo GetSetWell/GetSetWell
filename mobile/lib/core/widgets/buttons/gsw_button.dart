@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_sizes.dart';
@@ -82,7 +83,7 @@ class GSWButton extends StatelessWidget {
           minimumSize: WidgetStatePropertyAll(Size(fullWidth ? double.infinity : 0, _height)),
 
           shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(GSWRadius.full)),
           ),
 
           elevation: const WidgetStatePropertyAll(0),

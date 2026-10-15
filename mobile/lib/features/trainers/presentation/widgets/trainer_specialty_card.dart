@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 
@@ -20,7 +21,7 @@ class TrainerSpecialtyCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -42,6 +43,7 @@ class TrainerSpecialtyCard extends StatelessWidget {
             textAlign: TextAlign.center,
             style: GSWTextStyles.bodyMedium.copyWith(
               color: GSWColors.textPrimary,
+              height: 20 / 14,
             ),
           ),
         ],

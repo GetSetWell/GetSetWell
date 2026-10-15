@@ -1,5 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth;
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/features/profile/data/services/account_deletion_service.dart';
 import 'package:mobile/features/sessions/data/services/sessions_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +15,8 @@ import '../../../../core/theme/gsw_typography.dart';
 import '../../../../core/widgets/buttons/gsw_button.dart';
 import '../../../../core/widgets/inputs/gsw_text_field.dart';
 
+/// 12.6a Delete account, session booked (Figma 819:3698) and
+/// 12.6b Delete account, nothing booked (Figma 1086:3780).
 class DeleteAccountScreen extends StatefulWidget {
   const DeleteAccountScreen({super.key, required this.onKeepAccount});
 
@@ -57,6 +64,14 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     super.dispose();
   }
 
+  /// Deletion can fail after the person was already signed out. A signed-out
+  /// person must not stay on this screen, so send them to Welcome.
+  bool _leaveIfSignedOut() {
+    if (FirebaseAuth.instance.currentUser != null) return false;
+    if (mounted) context.go(GSWRoutes.onboarding);
+    return true;
+  }
+
   Future<void> _handleDelete() async {
     if (!_canDelete || _isDeleting) {
       return;
@@ -74,6 +89,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       context.go(GSWRoutes.onboarding);
     } on AccountDeletionException catch (error) {
       debugPrint('Delete account failed: ${error.message}');
+      if (_leaveIfSignedOut()) return;
       final requiresRecentLogin = error.message.toLowerCase().contains('sign in again');
       _showDeletionError(
         requiresRecentLogin
@@ -83,6 +99,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       _retryUpcomingSessions();
     } catch (error) {
       debugPrint('Delete account failed: $error');
+      if (_leaveIfSignedOut()) return;
       _showDeletionError(
         'We could not confirm account deletion. Please contact info@getsetwell.com before trying again.',
       );
@@ -118,7 +135,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                     behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
                     child: SingleChildScrollView(
                       physics: const ClampingScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -128,7 +145,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
                           Text(
                             'Delete your account',
-                            style: GSWTextStyles.titleExtraLarge.copyWith(
+                            style: GSWTextStyles.titleLarge.copyWith(
+                              height: 30 / 24,
                               color: GSWColors.textPrimary,
                             ),
                           ),
@@ -137,8 +155,9 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
                           if (isCheckingSessions)
                             Text(
-                              'Checking your upcoming sessions…',
+                              'Checking your upcoming sessions...',
                               style: GSWTextStyles.bodyMedium.copyWith(
+                                height: 20 / 14,
                                 color: GSWColors.textSecondary,
                               ),
                             )
@@ -149,12 +168,17 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                                 Text(
                                   'We could not check your upcoming sessions. Please try again.',
                                   style: GSWTextStyles.bodyMedium.copyWith(
+                                    height: 20 / 14,
                                     color: GSWColors.textSecondary,
                                   ),
                                 ),
-                                TextButton(
+                                const SizedBox(height: 12),
+                                GSWButton(
+                                  label: 'Try again',
+                                  variant: GSWButtonVariant.secondary,
+                                  size: GSWButtonSize.medium,
+                                  fullWidth: false,
                                   onPressed: _retryUpcomingSessions,
-                                  child: const Text('Try again'),
                                 ),
                               ],
                             )
@@ -180,63 +204,99 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     );
   }
 
+  TextStyle get _introStyle =>
+      GSWTextStyles.bodyMedium.copyWith(height: 20 / 14, color: GSWColors.textSecondary);
+
+  Widget _buildDataCopyNote() {
+    return Text(
+      'Want a copy of your data first? Email info@getsetwell.com.',
+      style: GSWTextStyles.bodySmall.copyWith(height: 16 / 12, color: GSWColors.textTertiary),
+    );
+  }
+
+  /// Refund line for the warning card, bound to the first upcoming session.
+  /// Uses the price snapshot on the session (falls back to the trainer rate).
+  String _upcomingRefundLine(List<Map<String, dynamic>> sessions) {
+    if (sessions.length != 1) {
+      return 'Cancel them before you delete your account. What you get back depends on '
+          'how far away each one is.';
+    }
+
+    final session = sessions.first;
+    final trainer = session['trainers'];
+    final rate =
+        GSWMoney.parse(session['session_rate']) ??
+        (trainer is Map ? GSWMoney.parse(trainer['price_per_session']) : null);
+
+    final start = GSWTime.parseToDubai(session['scheduled_at']);
+    if (start == null || rate == null) {
+      return 'Cancel it before you delete your account.';
+    }
+
+    final hoursAway = start.difference(GSWTime.nowDubai()).inMinutes / 60;
+
+    if (hoursAway >= 24) {
+      return "Cancel it before you delete your account. It's more than 24 hours away, "
+          "so you'd get the ${GSWMoney.aed(rate)} session rate back.";
+    }
+
+    return "Cancel it before you delete your account. It's less than 24 hours away, "
+        "so you'd get half the session rate back, ${GSWMoney.aed(GSWMoney.half(rate))}.";
+  }
+
+  /// 12.6a: an upcoming session blocks deletion.
   Widget _buildUpcomingSessionState(List<Map<String, dynamic>> sessions) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'You can request account deletion once you have no upcoming confirmed or booked sessions.',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          'You can delete your account once you have no upcoming sessions.',
+          style: _introStyle,
         ),
 
         const SizedBox(height: 24),
 
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: GSWColors.error, width: 1),
+            borderRadius: BorderRadius.circular(GSWRadius.card),
+            border: Border.all(color: GSWColors.borderError),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'You have ${sessions.length} upcoming ${sessions.length == 1 ? 'session' : 'sessions'}',
-                style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
-              ),
-
-              const SizedBox(height: 12),
-
-              Text(
-                'Please review your upcoming bookings before deleting your account. Cancellation and refund eligibility depend on your booking and the applicable policy.',
-                style: GSWTextStyles.bodyLarge.copyWith(
-                  color: GSWColors.textSecondary,
-                  height: 1.5,
+                style: GSWTextStyles.labelLarge.copyWith(
+                  height: 22 / 16,
+                  color: GSWColors.textPrimary,
                 ),
               ),
+
+              const SizedBox(height: 8),
+
+              Text(_upcomingRefundLine(sessions), style: _introStyle),
             ],
           ),
         ),
 
         const SizedBox(height: 24),
 
-        Text(
-          'Want a copy of your data first? Email info@getsetwell.com.',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-        ),
+        _buildDataCopyNote(),
       ],
     );
   }
 
+  /// 12.6b: nothing booked, type DELETE to confirm.
   Widget _buildNormalDeleteState() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "Deleting your sign-in account can't be undone. If you return to GetSetWell, you'll need to sign up again.",
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          "This can't be undone. To use GetSetWell again, you'd sign up as a new customer.",
+          style: _introStyle,
         ),
 
         const SizedBox(height: 24),
@@ -245,10 +305,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
         const SizedBox(height: 24),
 
-        Text(
-          'Want a copy of your data first? Email info@getsetwell.com.',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-        ),
+        _buildDataCopyNote(),
 
         const SizedBox(height: 24),
 
@@ -277,14 +334,19 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         },
         customBorder: const CircleBorder(),
         child: Container(
-          width: 48,
-          height: 48,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: GSWColors.borderSecondary),
           ),
           alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
+          child: SvgPicture.asset(
+            GSWIcons.arrowheadLeft,
+            width: 30,
+            height: 30,
+            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          ),
         ),
       ),
     );
@@ -293,34 +355,43 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   Widget _buildWhatHappensCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'What happens',
-            style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.bodyLarge.copyWith(
+              fontSize: 15,
+              height: 20 / 15,
+              fontWeight: FontWeight.w600,
+              color: GSWColors.textPrimary,
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Figma 12.6a/12.6b. True end to end: the sign-in account, profile,
+          // photo and notifications go immediately, and a daily job strips
+          // names, numbers, notes and addresses from retained booking records
+          // (migration 20261013170500).
+          _buildBullet(
+            'Your account, name, mobile number and email are deleted within 30 days.',
           ),
 
           const SizedBox(height: 12),
 
           _buildBullet(
-            'Your sign-in account is removed when the request succeeds. Other personal data is not yet automatically erased.',
+            'Booking, payment and refund records are kept for 7 years, as UAE tax law requires.',
           ),
 
           const SizedBox(height: 12),
 
-          _buildBullet(
-            'Some booking, payment and refund records may need to be retained for legal or operational reasons.',
-          ),
-
-          const SizedBox(height: 12),
-
-          _buildBullet('You are signed out on this device when the sign-in account is removed.'),
+          _buildBullet("You're logged out straight away on this phone."),
         ],
       ),
     );
@@ -331,7 +402,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 8, left: 1),
+          padding: const EdgeInsets.only(top: 7),
           child: Container(
             width: 6,
             height: 6,
@@ -339,14 +410,9 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           ),
         ),
 
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
 
-        Expanded(
-          child: Text(
-            text,
-            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary, height: 1.5),
-          ),
-        ),
+        Expanded(child: Text(text, style: _introStyle)),
       ],
     );
   }
@@ -356,7 +422,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     required bool sessionCheckUnavailable,
   }) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: sessionCheckUnavailable
           ? GSWButton(
               label: 'Delete my account',
@@ -387,12 +453,22 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
                 const SizedBox(height: 12),
 
-                TextButton(
-                  onPressed: widget.onKeepAccount,
-                  style: TextButton.styleFrom(foregroundColor: GSWColors.textSecondary),
-                  child: Text(
-                    'Keep my account',
-                    style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textSecondary),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _isDeleting ? null : widget.onKeepAccount,
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Opacity(
+                      opacity: 0.6,
+                      child: Text(
+                        'Keep my account',
+                        textAlign: TextAlign.center,
+                        style: GSWTextStyles.labelMedium.copyWith(
+                          height: 20 / 14,
+                          color: GSWColors.textPrimary,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],

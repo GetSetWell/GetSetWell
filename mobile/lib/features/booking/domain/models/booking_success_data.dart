@@ -32,26 +32,3 @@ class ConciergeMatchSuccessData extends BookingSuccessData {
   final String? budget;
   final String? language;
 }
-
-class TrainerRequestSuccessData extends BookingSuccessData {
-  const TrainerRequestSuccessData({
-    required super.requestId,
-    required super.referenceCode,
-    required this.trainerName,
-    required this.rate,
-    required this.goal,
-    required this.days,
-    required this.time,
-    required this.trainingLocation,
-    required this.preferredArea,
-  });
-
-  final String trainerName;
-  final String rate;
-
-  final String goal;
-  final String days;
-  final String time;
-  final String trainingLocation;
-  final String preferredArea;
-}

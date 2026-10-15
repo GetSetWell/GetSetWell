@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
-import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
+import 'package:mobile/features/sessions/data/services/sessions_service.dart';
+import 'package:mobile/features/sessions/presentation/widgets/session_ui.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,93 +37,39 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
   }
 
   Future<_CancelledSessionData> _loadData() async {
-    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
-
-    final sessionRow = await _client
-        .from('sessions')
-        .select('''
-
-          id,
-
-          booking_request_id,
-
-          trainer_id,
-
-          scheduled_at,
-
-          location_label,
-
-          goal,
-
-          notes,
-
-          status,
-
-          cancelled_at,
-
-          cancellation_refund_amount,
-
-          trainers(
-
-            id,
-
-            full_name,
-
-            price_per_session
-
-          )
-
-        ''')
-        .eq('id', widget.sessionId)
-        .eq('user_id', customerId)
-        .single();
-
-    final session = Map<String, dynamic>.from(sessionRow);
-
-    Map<String, dynamic> request = {};
-
-    final requestId = session['booking_request_id']?.toString().trim() ?? '';
-
-    if (requestId.isNotEmpty) {
-      final requestRow = await _client
-          .from('booking_requests')
-          .select('id, reference_code, created_at, goal, message')
-          .eq('id', requestId)
-          .eq('user_id', customerId)
-          .maybeSingle();
-
-      if (requestRow != null) {
-        request = Map<String, dynamic>.from(requestRow);
-      }
-    }
-
-    final trainerRaw = session['trainers'];
-
-    final trainer = trainerRaw is Map ? Map<String, dynamic>.from(trainerRaw) : <String, dynamic>{};
-
-    return _CancelledSessionData(session: session, request: request, trainer: trainer);
+    final session = await SessionsService(_client).getSession(widget.sessionId);
+    if (sessionStartDubai(session) == null) throw Exception('Session has no scheduled time.');
+    return _CancelledSessionData(session: session);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GSWColors.backgroundPrimary,
+    // Reached with go(), so the stack is empty: Android back opens Sessions
+    // instead of closing the app.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(GSWRoutes.sessions);
+      },
+      child: Scaffold(
+        backgroundColor: GSWColors.backgroundPrimary,
 
-      body: SafeArea(
-        child: FutureBuilder<_CancelledSessionData>(
-          future: _dataFuture,
+        body: SafeArea(
+          child: FutureBuilder<_CancelledSessionData>(
+            future: _dataFuture,
 
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator(color: GSWColors.primary));
-            }
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: GSWColors.primary));
+              }
 
-            if (snapshot.hasError || snapshot.data == null) {
-              return _buildErrorState();
-            }
+              if (snapshot.hasError || snapshot.data == null) {
+                return _buildErrorState();
+              }
 
-            return _buildContent(snapshot.data!);
-          },
+              return _buildContent(snapshot.data!);
+            },
+          ),
         ),
       ),
     );
@@ -136,7 +85,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
             child: SingleChildScrollView(
               physics: const ClampingScrollPhysics(),
 
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
 
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,24 +97,27 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
 
                   Center(
                     child: Text(
-                      'Session cancelled',
+                      'SESSION CANCELLED',
 
                       textAlign: TextAlign.center,
 
-                      style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary),
+                      style: GSWTextStyles.displayLarge.copyWith(color: GSWColors.textPrimary, height: 1),
                     ),
                   ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
 
                   Center(
                     child: Text(
-                      '${data.firstName} has been told & '
-                      '${_money(data.refundAmount)} is on its way back to the card you paid with.',
+                      data.refundAmount == null
+                          ? '${data.firstName} has been told. Your refund is being confirmed and goes back to the card you paid with.'
+                          : data.refundAmount! <= 0
+                              ? '${data.firstName} has been told.'
+                              : '${data.firstName} has been told. ${GSWMoney.aed(data.refundAmount)} is on its way back to the card you paid with.',
 
                       textAlign: TextAlign.center,
 
-                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
                     ),
                   ),
 
@@ -178,7 +130,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
                   Text(
                     'What happens next',
 
-                    style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+                    style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary, height: 1),
                   ),
 
                   const SizedBox(height: 8),
@@ -190,7 +142,9 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
                   Text(
                     data.cancelledTimingText,
 
-                    style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                    textAlign: TextAlign.center,
+
+                    style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary, height: 16 / 12),
                   ),
                 ],
               ),
@@ -228,7 +182,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
 
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
 
       child: Column(
@@ -241,38 +195,38 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
                 child: Text(
                   'What was cancelled',
 
-                  style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textSecondary, height: 20 / 16),
                 ),
               ),
 
-              Text(
+              if (data.referenceCode.isNotEmpty)
+                Text(
                 data.referenceCode,
 
-                style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
+                style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textAccent, height: 20 / 16),
               ),
             ],
           ),
 
           const SizedBox(height: 10),
 
-          Divider(color: GSWColors.neutral700, height: 1),
+          const Divider(color: GSWColors.surfaceInteractive, height: 1, thickness: 1),
 
           const SizedBox(height: 10),
 
           Text(
             data.trainerName,
 
-            style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary, height: 1),
           ),
 
           const SizedBox(height: 10),
 
           Text(
-            '${_longDate(data.scheduledAtDubai)}, '
-            '${_timeLabel(data.scheduledAtDubai)} to '
-            '${_timeLabel(data.scheduledAtDubai.add(const Duration(hours: 1)))}',
+            '${GSWTime.dayLong(data.scheduledAtDubai)}, '
+            '${GSWTime.timeRange(data.scheduledAtDubai, kSessionLength)}',
 
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 20 / 14),
           ),
 
           if (data.locationLabel.isNotEmpty) ...[
@@ -281,17 +235,18 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
             Text(
               data.locationLabel,
 
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
             ),
           ],
 
           const SizedBox(height: 10),
 
           Text(
-            '${_money(data.refundAmount)} refunded of '
-            '${_money(data.totalPaid)} paid',
+            data.refundAmount == null
+                ? 'Refund being confirmed, ${GSWMoney.aed(data.totalPaid)} paid'
+                : '${GSWMoney.aed(data.refundAmount)} refunded of ${GSWMoney.aed(data.totalPaid)} paid',
 
-            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
+            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textAccent, height: 20 / 14),
           ),
         ],
       ),
@@ -307,7 +262,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
 
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
 
       child: Column(
@@ -317,7 +272,9 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
           const SizedBox(height: 8),
 
           if (data.isLateCancellation)
-            _buildBullet('Half the session fee goes to ${data.firstName} for holding the time')
+            _buildBullet(
+              'Half the session fee goes to ${data.firstName} for holding the time',
+            )
           else
             _buildBullet('Nothing from the session fee goes to ${data.firstName}'),
 
@@ -329,35 +286,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
     );
   }
 
-  Widget _buildBullet(String text) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-
-          child: Container(
-            width: 4,
-
-            height: 4,
-
-            decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-          ),
-        ),
-
-        const SizedBox(width: 8),
-
-        Expanded(
-          child: Text(
-            text,
-
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.45),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _buildBullet(String text) => SessionBullet(text);
 
   Future<void> _bookTrainerAgain(_CancelledSessionData data) async {
     if (data.trainerId.isEmpty) {
@@ -393,6 +322,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
 
       final requestGoal = data.request['goal']?.toString().trim();
 
+
       final sessionNotes = data.session['notes']?.toString().trim();
 
       final requestNotes = data.request['message']?.toString().trim();
@@ -404,6 +334,14 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
           trainer: trainer,
 
           initialGoal: sessionGoal?.isNotEmpty == true ? sessionGoal : requestGoal,
+
+          initialTrainingPlace: BookingRequestRouteData.trainingPlaceFromDb(
+            data.session['customer_training_place'],
+          ),
+
+          initialVenueChoice: BookingRequestRouteData.venueChoiceFromDb(
+            data.session['venue_choice'],
+          ),
 
           initialLocationLabel: data.locationLabel,
 
@@ -443,7 +381,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
 
   Widget _buildBottomActions(_CancelledSessionData data) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
 
       color: GSWColors.backgroundPrimary,
 
@@ -465,7 +403,7 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
             },
           ),
 
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
 
           GSWButton(
             size: GSWButtonSize.large,
@@ -501,188 +439,50 @@ class _SessionCancelledScreenState extends State<SessionCancelledScreen> {
     );
   }
 
-  String _money(double value) {
-    final hasDecimals = value != value.roundToDouble();
-
-    return hasDecimals ? 'AED ${value.toStringAsFixed(2)}' : 'AED ${value.toStringAsFixed(0)}';
-  }
-
-  String _longDate(DateTime value) {
-    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-    const months = [
-      'January',
-
-      'February',
-
-      'March',
-
-      'April',
-
-      'May',
-
-      'June',
-
-      'July',
-
-      'August',
-
-      'September',
-
-      'October',
-
-      'November',
-
-      'December',
-    ];
-
-    return '${weekdays[value.weekday - 1]} '
-        '${value.day} ${months[value.month - 1]}';
-  }
-
-  String _timeLabel(DateTime value) {
-    var hour = value.hour;
-
-    final period = hour >= 12 ? 'PM' : 'AM';
-
-    hour %= 12;
-
-    if (hour == 0) hour = 12;
-
-    final minute = value.minute.toString().padLeft(2, '0');
-
-    return '$hour:$minute $period';
-  }
 }
 
 class _CancelledSessionData {
-  const _CancelledSessionData({
-    required this.session,
-
-    required this.request,
-
-    required this.trainer,
-  });
+  _CancelledSessionData({required this.session})
+      : trainer = SessionTrainerInfo.fromSession(session),
+        amounts = SessionAmounts.fromSession(session);
 
   final Map<String, dynamic> session;
+  final SessionTrainerInfo trainer;
+  final SessionAmounts amounts;
 
-  final Map<String, dynamic> request;
-
-  final Map<String, dynamic> trainer;
+  Map<String, dynamic> get request {
+    final value = session['booking_requests'];
+    return value is Map ? Map<String, dynamic>.from(value) : <String, dynamic>{};
+  }
 
   String get trainerId => session['trainer_id']?.toString().trim() ?? '';
 
-  String get trainerName => trainer['full_name']?.toString().trim().isNotEmpty == true
-      ? trainer['full_name'].toString().trim()
-      : 'Your trainer';
+  String get trainerName => trainer.name;
 
-  String get firstName => trainerName.split(RegExp(r'\s+')).first;
+  String get firstName => trainer.firstName;
 
   String get referenceCode {
     final value = request['reference_code']?.toString().trim();
-
-    return value != null && value.isNotEmpty ? value : 'GSW';
+    return value != null && value.isNotEmpty ? value : '';
   }
 
   String get locationLabel => session['location_label']?.toString().trim() ?? '';
 
-  DateTime get scheduledAtDubai {
-    final parsed = DateTime.parse(session['scheduled_at'].toString());
+  DateTime get scheduledAtDubai => sessionStartDubai(session)!;
 
-    return parsed.toUtc().add(const Duration(hours: 4));
-  }
+  DateTime get cancelledAtDubai =>
+      GSWTime.parseToDubai(session['cancelled_at']) ?? GSWTime.nowDubai();
 
-  DateTime get cancelledAtDubai {
-    final raw = session['cancelled_at']?.toString();
+  /// What was paid at booking (snapshot), trainer price only for legacy rows.
+  double? get totalPaid => amounts.total;
 
-    final parsed = raw != null ? DateTime.tryParse(raw) : null;
+  bool get isLateCancellation =>
+      scheduledAtDubai.difference(cancelledAtDubai) < const Duration(hours: 24);
 
-    return (parsed ?? DateTime.now()).toUtc().add(const Duration(hours: 4));
-  }
+  /// The refund stored by cancel_session. Never recomputed on the device.
+  double? get refundAmount => GSWMoney.parse(session['cancellation_refund_amount']);
 
-  double get sessionRate {
-    final raw = trainer['price_per_session'];
-
-    if (raw is num) return raw.toDouble();
-
-    return double.tryParse(raw?.toString() ?? '') ?? 0;
-  }
-
-  double get serviceFee => sessionRate * 0.05;
-
-  double get totalPaid => sessionRate + serviceFee;
-
-  bool get isLateCancellation {
-    return scheduledAtDubai.difference(cancelledAtDubai).inMinutes < 24 * 60;
-  }
-
-  double get refundAmount {
-    final raw = session['cancellation_refund_amount'];
-
-    if (raw is num) return raw.toDouble();
-
-    final parsed = double.tryParse(raw?.toString() ?? '');
-
-    if (parsed != null) return parsed;
-
-    return isLateCancellation ? sessionRate * 0.5 : sessionRate;
-  }
-
-  String get cancelledTimingText {
-    return 'Cancelled ${_weekday(cancelledAtDubai)} '
-        '${cancelledAtDubai.day} ${_month(cancelledAtDubai)}, '
-        '${_time(cancelledAtDubai)}, '
-        '${isLateCancellation ? 'inside' : 'outside'} '
-        'the 24 hour window';
-  }
-
-  static String _weekday(DateTime value) {
-    const values = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-    return values[value.weekday - 1];
-  }
-
-  static String _month(DateTime value) {
-    const values = [
-      'January',
-
-      'February',
-
-      'March',
-
-      'April',
-
-      'May',
-
-      'June',
-
-      'July',
-
-      'August',
-
-      'September',
-
-      'October',
-
-      'November',
-
-      'December',
-    ];
-
-    return values[value.month - 1];
-  }
-
-  static String _time(DateTime value) {
-    var hour = value.hour;
-
-    final period = hour >= 12 ? 'PM' : 'AM';
-
-    hour %= 12;
-
-    if (hour == 0) hour = 12;
-
-    final minute = value.minute.toString().padLeft(2, '0');
-
-    return '$hour:$minute $period';
-  }
+  String get cancelledTimingText =>
+      'Cancelled ${GSWTime.dayLong(cancelledAtDubai)}, ${GSWTime.time(cancelledAtDubai)}, '
+      '${isLateCancellation ? 'inside' : 'outside'} the 24 hour window';
 }

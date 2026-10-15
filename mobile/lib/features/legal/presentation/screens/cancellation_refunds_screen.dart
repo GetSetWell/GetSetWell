@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/gsw_routes.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
+import 'legal_document_parts.dart';
 
+/// Cancellation and Refunds (Figma full text 1108:3736). Text is v1.2.
 class CancellationRefundsScreen extends StatefulWidget {
   const CancellationRefundsScreen({super.key, this.onReadArabic});
 
@@ -342,7 +345,7 @@ class _CancellationRefundsScreenState extends State<CancellationRefundsScreen> {
           elevation: 0,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
         ),
@@ -358,87 +361,75 @@ class _CancellationRefundsScreenState extends State<CancellationRefundsScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildTopBar(context),
+            LegalDocTopBar(onReadArabic: _handleReadArabic),
 
             Expanded(
               child: ScrollConfiguration(
                 behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
+                  padding: kLegalContentPadding,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Cancellation and Refunds',
-                        style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        'Version 1.2 · 28 September 2026',
-                        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'This policy forms part of our Terms of Service and of the Trainer Agreement. Where it differs from the Terms on a cancellation, reschedule, late arrival, missed session or refund, this policy applies.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                          height: 1.45,
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        'Every example uses the same booking: a session rate of AED 280, a service fee of AED 14, and a total of AED 294.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                          height: 1.45,
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      _buildShortVersionCard(),
-
-                      const SizedBox(height: 24),
-
-                      _buildSearchField(),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Text(
-                            _allExpanded
-                                ? 'All 18 sections, expanded'
-                                : '${_expandedSections.length} of 18 sections expanded',
-                            style: GSWTextStyles.labelMedium.copyWith(
-                              color: GSWColors.textSecondary,
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          GestureDetector(
-                            onTap: _toggleAll,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                _allExpanded ? 'Collapse all' : 'Expand all',
-                                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
-                              ),
-                            ),
-                          ),
+                      const LegalDocTitle(
+                        title: 'Cancellation and Refunds',
+                        version: 'Version 1.2 · 28 September 2026',
+                        intro:
+                            'This policy forms part of our Terms of Service and of the Trainer Agreement. Where it differs from the Terms on a cancellation, reschedule, late arrival, missed session or refund, this policy applies.',
+                        extra: [
+                          'Every example uses the same booking: a session rate of AED 280, a service fee of AED 14, and a total of AED 294.',
                         ],
                       ),
 
-                      const SizedBox(height: 8),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      const LegalShortVersionCard(
+                        points: [
+                          'Cancel 24 hours or more before and you get the session rate back. The 5% service fee is kept.',
+                          'Cancel less than 24 hours before and you get half the session rate back. If you don\'t turn up, nothing is refunded.',
+                          'You can move a booking once. It\'s free 24 hours or more before. Later than that, you pay half the rate again to confirm the new time.',
+                          'You and your trainer each have 15 minutes\' grace.',
+                          'If your trainer cancels or doesn\'t turn up: a full refund, a new time, or another trainer, with up to AED 75 of any price difference covered.',
+                          'Refunds go back to the card you paid with, usually in 5 to 10 working days.',
+                        ],
+                        footnote: 'A summary to help you. The full policy below is what applies.',
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSearchField(
+                        controller: _searchController,
+                        hintText: 'Search the policy',
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        onClear: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSectionsHeader(
+                        label: _allExpanded
+                            ? 'All ${_sections.length} sections, expanded'
+                            : 'All ${_sections.length} sections',
+                        allExpanded: _allExpanded,
+                        onToggle: () {
+                          _toggleAll();
+                          setState(() {
+                            _workedExamplesExpanded = _allExpanded;
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: 4),
 
                       if (visibleIndexes.isEmpty && !_workedExamplesMatch)
                         Padding(
@@ -453,16 +444,37 @@ class _CancellationRefundsScreenState extends State<CancellationRefundsScreen> {
                           ),
                         )
                       else ...[
+                        const LegalDivider(),
                         for (final index in visibleIndexes) ...[
                           _buildSection(index, _sections[index]),
-                          const Divider(height: 1, color: GSWColors.borderSecondary),
+                          const LegalDivider(),
                         ],
-
-                        if (_workedExamplesMatch) _buildWorkedExamples(),
+                        if (_workedExamplesMatch) ...[
+                          _buildWorkedExamples(),
+                          const LegalDivider(),
+                        ],
                       ],
-                      const SizedBox(height: 32),
 
-                      _buildFooter(),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalReadWith(
+                        links: [
+                          LegalLink(
+                            'Terms of Service',
+                            () => context.push(GSWRoutes.termsOfService),
+                          ),
+                          LegalLink('Privacy Policy', () => context.push(GSWRoutes.privacyPolicy)),
+                        ],
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      const LegalDocFooter(
+                        contactHeading: 'Questions about a cancellation or refund?',
+                        contactLine: 'support@getsetwell.com · WhatsApp +971 50 525 1393',
+                        note:
+                            'Published in Arabic and English. For clients, if the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
+                      ),
                     ],
                   ),
                 ),
@@ -474,491 +486,46 @@ class _CancellationRefundsScreenState extends State<CancellationRefundsScreen> {
     );
   }
 
-  Widget _buildTopBar(BuildContext context) {
-    return SizedBox(
-      height: 54,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            _buildBackButton(context),
-
-            const Spacer(),
-
-            TextButton(
-              onPressed: _handleReadArabic,
-              style: TextButton.styleFrom(
-                foregroundColor: GSWColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              child: Text(
-                'Read in Arabic',
-                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortVersionCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'THE SHORT VERSION',
-            style: GSWTextStyles.labelSmall.copyWith(
-              color: GSWColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          _summaryItem(
-            'Cancel 24 hours or more before and you get the session rate back. The 5% service fee is kept.',
-          ),
-
-          _summaryItem(
-            'Cancel less than 24 hours before and you get half the session rate back. If you don\'t turn up, nothing is refunded.',
-          ),
-
-          _summaryItem(
-            'You can move a booking once. It\'s free 24 hours or more before. Later than that, you pay half the rate again to confirm the new time.',
-          ),
-
-          _summaryItem('You and your trainer each have 15 minutes\' grace.'),
-
-          _summaryItem(
-            'If your trainer cancels or doesn\'t turn up: a full refund, a new time, or another trainer, with up to AED 75 of any price difference covered.',
-          ),
-
-          _summaryItem(
-            'Refunds go back to the card you paid with, usually in 5 to 10 working days.',
-          ),
-
-          const SizedBox(height: 8),
-
-          Text(
-            'A summary to help you. The full policy below is what applies.',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 11),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 1.45),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchField() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: TextField(
-        controller: _searchController,
-        cursorColor: GSWColors.primary,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search the policy',
-          hintStyle: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          prefixIcon: const Icon(Icons.search_rounded, color: GSWColors.textSecondary, size: 20),
-          suffixIcon: _searchQuery.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                  icon: const Icon(Icons.close_rounded, color: GSWColors.textSecondary, size: 18),
-                ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 13),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSection(int index, _LegalSection section) {
-    final expanded = _expandedSections.contains(index);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => _toggleSection(index),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    section.number,
-                    style: GSWTextStyles.titleSmall.copyWith(
-                      color: GSWColors.primary,
-                      fontFamily: 'BebasNeue',
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      section.title,
-                      style: GSWTextStyles.labelLarge.copyWith(
-                        color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Icon(
-                  expanded ? Icons.remove_rounded : Icons.add_rounded,
-                  size: 20,
-                  color: GSWColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-
-          if (expanded) ...[
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final paragraph in section.paragraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.bullets) _bullet(bullet),
-
-                  for (final card in section.cards) _policyCard(card),
-
-                  for (final paragraph in section.trailingParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.trailingBullets) _bullet(bullet),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
+    return LegalAccordionSection(
+      number: section.number,
+      title: section.title,
+      expanded: _expandedSections.contains(index),
+      onTap: () => _toggleSection(index),
+      children: [
+        for (final paragraph in section.paragraphs) LegalParagraph(paragraph),
+        for (final bullet in section.bullets) LegalBullet(bullet),
+        if (section.cards.isNotEmpty) _policyTable(section.cards),
+        for (final paragraph in section.trailingParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.trailingBullets) LegalBullet(bullet),
+      ],
     );
   }
 
-  Widget _buildBackButton(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (context.canPop()) {
-            context.pop();
-          }
-        },
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: GSWColors.borderSecondary),
-          ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
-        ),
-      ),
-    );
-  }
-
-  Widget _policyCard(_PolicyCard card) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            card.title,
-            style: GSWTextStyles.labelMedium.copyWith(
-              color: GSWColors.textPrimary,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          for (var index = 0; index < card.lines.length; index++) ...[
-            Text(
-              card.lines[index],
-              style: GSWTextStyles.bodyMedium.copyWith(
-                color: GSWColors.textSecondary,
-                height: 1.45,
-              ),
-            ),
-
-            if (index != card.lines.length - 1) const SizedBox(height: 6),
-          ],
-        ],
-      ),
+  /// Outcome table (Figma 1108:3897).
+  Widget _policyTable(List<_PolicyCard> cards) {
+    return LegalTable(
+      rows: [for (final card in cards) LegalTableRow(title: card.title, lines: card.lines)],
     );
   }
 
   Widget _buildWorkedExamples() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () {
-              setState(() {
-                _workedExamplesExpanded = !_workedExamplesExpanded;
-              });
-            },
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(width: 28),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      'Worked examples',
-                      style: GSWTextStyles.labelLarge.copyWith(
-                        color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Icon(
-                  _workedExamplesExpanded ? Icons.remove_rounded : Icons.add_rounded,
-                  size: 20,
-                  color: GSWColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-
-          if (_workedExamplesExpanded) ...[
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _paragraph('For a session rate of AED 280, service fee AED 14, total AED 294.'),
-
-                  for (final example in _workedExamples) _paragraph(example),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _paragraph(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Text(
-        text,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-      ),
-    );
-  }
-
-  Widget _bullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooterLink({required String label, required VoidCallback onTap}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-                ),
-              ),
-
-              const Icon(Icons.chevron_right_rounded, color: GSWColors.textSecondary, size: 26),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _footerDivider() {
-    return const Divider(height: 1, color: GSWColors.borderSecondary);
-  }
-
-  Widget _buildFooter() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return LegalAccordionSection(
+      number: 'EX',
+      title: 'Worked examples',
+      expanded: _workedExamplesExpanded,
+      onTap: () {
+        setState(() {
+          _workedExamplesExpanded = !_workedExamplesExpanded;
+        });
+      },
       children: [
-        Text(
-          'READ WITH THESE',
-          style: GSWTextStyles.labelMedium.copyWith(
-            color: GSWColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
+        const LegalParagraph('For a session rate of AED 280, service fee AED 14, total AED 294.'),
+        for (var index = 0; index < _workedExamples.length; index++)
+          LegalNumberedItem(
+            number: index + 1,
+            text: _workedExamples[index].replaceFirst(RegExp(r'^\d+\.\s*'), ''),
           ),
-        ),
-
-        const SizedBox(height: 16),
-
-        _buildFooterLink(
-          label: 'Terms of Service',
-          onTap: () {
-            context.push(GSWRoutes.termsOfService);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Privacy Policy',
-          onTap: () {
-            context.push(GSWRoutes.privacyPolicy);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Prohibited Services Policy',
-          onTap: () {
-            context.push(GSWRoutes.prohibitedServices);
-          },
-        ),
-
-        _footerDivider(),
-
-        const SizedBox(height: 24),
-
-        Text(
-          'Questions about a cancellation or refund?',
-          style: GSWTextStyles.labelLarge.copyWith(
-            color: GSWColors.textPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          'info@getsetwell.com · WhatsApp +971 50 525 1393',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.primary),
-        ),
-
-        const SizedBox(height: 24),
-
-        Text(
-          'Published in Arabic and English. For clients, if the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-        ),
       ],
     );
   }

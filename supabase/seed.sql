@@ -299,15 +299,6 @@ values
   6,
   true,
   '2026-08-01'
-),
-(
-  (select id from public.trainers where slug = 'michelle-berowsky'),
-  'Met in person',
-  'Trainer met by the GetSetWell team in Dubai.',
-  'in_person',
-  7,
-  true,
-  '2026-08-01'
 );
 
 
@@ -376,15 +367,6 @@ values
   'Two long-term clients contacted by us.',
   'reference',
   6,
-  true,
-  '2026-08-09'
-),
-(
-  (select id from public.trainers where slug = 'atabey'),
-  'Met in person',
-  'Met in Business Bay, Dubai, 9 Aug 2026.',
-  'in_person',
-  7,
   true,
   '2026-08-09'
 );
@@ -457,15 +439,6 @@ values
   6,
   true,
   '2026-08-02'
-),
-(
-  (select id from public.trainers where slug = 'arash-vahedi'),
-  'Met in person',
-  'Trainer met by the GetSetWell team in Dubai.',
-  'in_person',
-  7,
-  true,
-  '2026-08-02'
 );
 
 
@@ -534,15 +507,6 @@ values
   'Two previous clients contacted by GetSetWell.',
   'reference',
   6,
-  true,
-  '2026-08-03'
-),
-(
-  (select id from public.trainers where slug = 'rajesh-pradhan'),
-  'Met in person',
-  'Trainer met by the GetSetWell team in Dubai.',
-  'in_person',
-  7,
   true,
   '2026-08-03'
 );

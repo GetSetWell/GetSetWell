@@ -1,16 +1,18 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/profile/model/profile_photo_bottomsheet.dart';
+import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/widgets/buttons/gsw_button.dart';
+import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../../../../core/theme/gsw_colors.dart';
-import '../../../../core/theme/gsw_typography.dart';
-import '../../../../core/widgets/buttons/gsw_button.dart';
-import '../../../../core/widgets/inputs/gsw_text_field.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key, this.onChangeNumber});
@@ -36,6 +38,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _profilePhotoUrl;
 
   String _phone = '';
+
+  /// 12.2f: set after a successful number change, so the helper line under
+  /// the number confirms the new number instead of a snackbar.
+  bool _numberChanged = false;
 
   String? _loadError;
   String? _saveError;
@@ -90,9 +96,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       return;
     }
-    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
 
     try {
+      final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
       final profile = await _supabase
           .from('customer_profiles')
           .select('''
@@ -115,9 +122,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       String? photoUrl;
 
       if (photoPath != null && photoPath.isNotEmpty) {
-        photoUrl = await _supabase.storage
-            .from('profile-photos')
-            .createSignedUrl(photoPath, 60 * 60);
+        // A missing or unreadable photo should not break the whole screen.
+        try {
+          photoUrl = await _supabase.storage
+              .from('profile-photos')
+              .createSignedUrl(photoPath, 60 * 60);
+        } catch (error) {
+          debugPrint('Profile photo URL failed: $error');
+        }
       }
 
       final profilePhone = profile?['phone']?.toString().trim() ?? user.phoneNumber?.trim() ?? '';
@@ -173,9 +185,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _saveError = null;
     });
 
-    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
-
     try {
+      final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
       await _supabase
           .from('customer_profiles')
           .update({
@@ -214,9 +226,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return;
     }
 
-    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
-
     try {
+      final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
       final bytes = await image.readAsBytes();
 
       final extension = image.name.contains('.') ? image.name.split('.').last.toLowerCase() : 'jpg';
@@ -269,9 +281,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (photoPath == null || photoPath.isEmpty) {
       return;
     }
-    final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
 
     try {
+      final customerId = await CustomerIdentityService(client: _supabase).getCustomerId();
+
       await _supabase.storage.from('profile-photos').remove([photoPath]);
 
       await _supabase
@@ -352,7 +365,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       if (!mounted) return;
 
-      _showMessage('Your mobile number has been updated.');
+      setState(() {
+        _numberChanged = true;
+      });
     }
   }
 
@@ -373,7 +388,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           margin: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
           duration: const Duration(seconds: 3),
@@ -404,7 +419,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget _buildContent() {
     if (_loadError != null) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -444,17 +459,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
       child: SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildBackButton(),
 
-            const SizedBox(height: 40),
+            const SizedBox(height: 24),
 
             Text(
               'Edit your details',
-              style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+              style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
             ),
 
             const SizedBox(height: 24),
@@ -490,8 +505,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
               Text(_saveError!, style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.error)),
             ],
-
-            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -509,27 +522,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         },
         customBorder: const CircleBorder(),
         child: Container(
-          width: 48,
-          height: 48,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: GSWColors.borderSecondary),
           ),
           alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
+          child: SvgPicture.asset(
+            GSWIcons.arrowheadLeft,
+            width: 30,
+            height: 30,
+            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          ),
         ),
       ),
     );
   }
 
+  /// Profile photo card (12.2c 1049:3352).
   Widget _buildPhotoCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+        border: Border.all(color: GSWColors.surfaceInteractive),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -544,26 +563,42 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               children: [
                 Text(
                   'Profile photo (optional)',
-                  style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary),
+                  style: GSWTextStyles.bodyLarge.copyWith(
+                    fontSize: 15,
+                    height: 21 / 15,
+                    fontWeight: FontWeight.w600,
+                    color: GSWColors.textPrimary,
+                  ),
                 ),
 
-                const SizedBox(height: 6),
+                const SizedBox(height: 2),
 
                 Text(
                   'Your trainer sees it, so they can recognise you on the day.',
-                  style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    fontSize: 13,
+                    height: 18 / 13,
+                    color: GSWColors.textSecondary,
+                  ),
                 ),
 
-                const SizedBox(height: 14),
+                const SizedBox(height: 2),
 
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _handleAddPhoto,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text(
-                      'Add a photo',
-                      style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
+                  child: SizedBox(
+                    height: 44,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _profilePhotoPath != null ? 'Change photo' : 'Add a photo',
+                        style: GSWTextStyles.labelMedium.copyWith(
+                          height: 20 / 14,
+                          fontWeight: FontWeight.w600,
+                          color: GSWColors.textAccent,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -576,45 +611,46 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildAvatar() {
-    return SizedBox(
-      width: 84,
-      height: 84,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: ClipOval(
-              child: _profilePhotoUrl != null
-                  ? Image.network(
-                      _profilePhotoUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return _buildInitialAvatar();
-                      },
-                    )
-                  : _buildInitialAvatar(),
+    return GestureDetector(
+      onTap: _handleAddPhoto,
+      child: SizedBox(
+        width: 72,
+        height: 72,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: ClipOval(
+                child: _profilePhotoUrl != null
+                    ? Image.network(
+                        _profilePhotoUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildInitialAvatar();
+                        },
+                      )
+                    : _buildInitialAvatar(),
+              ),
             ),
-          ),
 
-          Positioned(
-            right: -2,
-            bottom: 0,
-            child: GestureDetector(
-              onTap: _handleAddPhoto,
+            // Add badge: 26px at (50, 48) inside the 72px avatar.
+            Positioned(
+              left: 50,
+              top: 48,
               child: Container(
-                width: 30,
-                height: 30,
+                width: 26,
+                height: 26,
                 decoration: BoxDecoration(
                   color: GSWColors.primary,
                   shape: BoxShape.circle,
-                  border: Border.all(color: GSWColors.backgroundPrimary, width: 3),
+                  border: Border.all(color: GSWColors.surfacePrimary, width: 2),
                 ),
                 alignment: Alignment.center,
-                child: const Icon(Icons.add_rounded, size: 22, color: GSWColors.backgroundPrimary),
+                child: const Icon(Icons.add_rounded, size: 18, color: GSWColors.iconInverse),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -625,56 +661,66 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       alignment: Alignment.center,
       child: Text(
         _profileInitial,
-        style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+        style: GSWTextStyles.titleExtraLarge.copyWith(
+          height: 34 / 28,
+          fontWeight: FontWeight.w600,
+          color: GSWColors.textPrimary,
+        ),
       ),
     );
   }
 
+  /// Mobile number as a field-shaped row with a Secondary "Change" button
+  /// (12.2c 1049:3386). Login codes go by SMS, so the copy says SMS.
   Widget _buildPhoneSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Mobile number',
-          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(height: 1, color: GSWColors.textSecondary),
         ),
 
         const SizedBox(height: 8),
 
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: GSWColors.borderSecondary),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
+            border: Border.all(color: GSWColors.surfaceInteractive),
           ),
           child: Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _formatPhone(_phone),
-                      style: GSWTextStyles.titleExtraSmall.copyWith(
+                      style: GSWTextStyles.labelLarge.copyWith(
+                        height: 22 / 16,
                         color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
 
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
 
                     Row(
                       children: [
-                        const Icon(Icons.check_rounded, color: GSWColors.primary, size: 20),
+                        const Icon(Icons.check_rounded, color: GSWColors.iconAccent, size: 14),
 
                         const SizedBox(width: 6),
 
                         Flexible(
                           child: Text(
-                            'Verified on WhatsApp',
+                            'Verified by SMS',
                             style: GSWTextStyles.bodyMedium.copyWith(
+                              fontSize: 13,
+                              height: 18 / 13,
                               color: GSWColors.textSecondary,
                             ),
                           ),
@@ -688,12 +734,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               const SizedBox(width: 12),
 
               SizedBox(
-                width: 104,
+                height: 40,
                 child: GSWButton(
                   label: 'Change',
                   onPressed: _handleChangeNumber,
                   variant: GSWButtonVariant.secondary,
                   size: GSWButtonSize.medium,
+                  fullWidth: false,
                 ),
               ),
             ],
@@ -703,8 +750,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         const SizedBox(height: 8),
 
         Text(
-          "To change it, we'll send a code to your new number on WhatsApp.",
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          _numberChanged
+              ? "Changed just now. We'll use ${_formatPhone(_phone)} for your codes and session messages."
+              : "To change it, we'll send a code to your new number by SMS.",
+          style: GSWTextStyles.bodySmall.copyWith(
+            height: 17 / 12,
+            color: _numberChanged ? GSWColors.textPrimary : GSWColors.textSecondary,
+          ),
         ),
       ],
     );
@@ -712,7 +764,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Widget _buildBottomAction() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: GSWButton(
         label: 'Save',
         onPressed: _isSaving ? null : _saveProfile,

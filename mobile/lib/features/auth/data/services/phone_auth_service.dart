@@ -1,3 +1,5 @@
+import 'package:firebase_auth/firebase_auth.dart';
+
 import 'firebase_phone_verification_service.dart';
 
 class PhoneAuthService {
@@ -6,25 +8,17 @@ class PhoneAuthService {
 
   final FirebasePhoneVerificationService _firebaseService;
 
-  String? _verificationId;
-
-  Future<void> sendOtp({required String phone}) async {
-    _verificationId = await _firebaseService.sendTestOtp(phone: phone);
+  /// Sends a login code by SMS. Pass [forceResendingToken] from the previous
+  /// request when resending.
+  Future<PhoneOtpRequest> sendOtp({required String phone, int? forceResendingToken}) {
+    return _firebaseService.sendOtp(phone: phone, forceResendingToken: forceResendingToken);
   }
 
-  Future<String> verifyOtp({
-    required String phone,
-    required String otp,
-    String? verificationId,
-  }) async {
-    final id = verificationId ?? _verificationId;
-
-    if (id == null || id.isEmpty) {
+  Future<User> verifyOtp({required String otp, required String verificationId}) {
+    if (verificationId.isEmpty) {
       throw StateError('Firebase verification ID is missing.');
     }
 
-    return _firebaseService.verifyTestOtp(verificationId: id, otp: otp);
+    return _firebaseService.verifyOtp(verificationId: verificationId, otp: otp);
   }
-
-  String? get verificationId => _verificationId;
 }

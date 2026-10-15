@@ -3,18 +3,22 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
+import 'package:mobile/core/widgets/common/gsw_dashed_border.dart';
 import 'package:mobile/core/widgets/common/header.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
 import 'package:mobile/features/booking/data/services/active_concierge_match_service.dart';
+import 'package:mobile/features/booking/domain/models/active_concierge_match.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_card.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_filters_bottom_sheet.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_matching_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/gsw_icons.dart';
+import '../../../../core/theme/gsw_radius.dart';
 import '../../../../core/theme/gsw_sizes.dart';
-import '../../../../core/widgets/badges/gsw_fillter_chip.dart';
 import '../../../../core/widgets/common/gsw_status_pill.dart';
 import '../../data/repositories/trainer_repository.dart';
 import '../../domain/models/trainer.dart';
@@ -27,8 +31,8 @@ class _TrainerCategory {
   final bool isComingSoon;
 }
 
-TrainerFilters _trainerFilters = const TrainerFilters();
-
+/// Figma 8.1 Trainers list (818:3362), with the 8.2 Filters / 8.3 No results
+/// sheet opened from the Filters button.
 class BrowseTrainersScreen extends StatefulWidget {
   const BrowseTrainersScreen({super.key});
 
@@ -37,37 +41,67 @@ class BrowseTrainersScreen extends StatefulWidget {
 }
 
 class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
-  bool _showFemaleOnly = false;
+  static const String _allCategory = 'All';
+
+  /// Live categories: All, Personal Training, Yoga and Pilates.
+  /// Nutrition Coaching and Recovery and Mobility are coming soon.
+  static const List<_TrainerCategory> _categories = [
+    _TrainerCategory(label: _allCategory),
+    _TrainerCategory(label: 'Personal Training', iconPath: GSWIcons.dumbell),
+    _TrainerCategory(label: 'Yoga and Pilates', iconPath: GSWIcons.yoga),
+    _TrainerCategory(label: 'Nutrition Coaching', iconPath: GSWIcons.nutrition, isComingSoon: true),
+    _TrainerCategory(label: 'Recovery and Mobility', iconPath: GSWIcons.recovery, isComingSoon: true),
+  ];
+
   late final TrainerRepository _trainerRepository;
   late final ActiveConciergeMatchService _activeConciergeMatchService;
 
-  late final Future<List<Trainer>> _trainersFuture;
-  String _selectedCategory = 'All';
+  late Future<List<Trainer>> _trainersFuture;
 
-  final List<_TrainerCategory> _categories = [
-    const _TrainerCategory(label: 'All'),
-    const _TrainerCategory(label: 'Personal Training', iconPath: GSWIcons.dumbell),
-    const _TrainerCategory(label: 'Yoga and Pilates', iconPath: GSWIcons.yoga),
-    const _TrainerCategory(
-      label: 'Nutrition Coaching',
-      iconPath: GSWIcons.nutrition,
-      isComingSoon: true,
-    ),
-    const _TrainerCategory(
-      label: 'Recovery and Mobility',
-      iconPath: GSWIcons.recovery,
-      isComingSoon: true,
-    ),
-  ];
+  /// Cached once per screen so the Help me choose card does not refetch and
+  /// flicker on every rebuild.
+  late Future<ActiveConciergeMatch?> _activeMatchFuture;
+
+  /// Filter state lives in the screen, so it resets with the screen (and on
+  /// logout) instead of leaking through a global.
+  TrainerFilters _trainerFilters = const TrainerFilters();
+  bool _showFemaleOnly = false;
+  String _selectedCategory = _allCategory;
+
   @override
   void initState() {
     super.initState();
+
     final client = Supabase.instance.client;
 
-    _trainerRepository = TrainerRepository(Supabase.instance.client);
+    _trainerRepository = TrainerRepository(client);
     _activeConciergeMatchService = ActiveConciergeMatchService(client);
 
     _trainersFuture = _trainerRepository.getTrainers();
+    _activeMatchFuture = _loadActiveMatch();
+  }
+
+  Future<ActiveConciergeMatch?> _loadActiveMatch() async {
+    try {
+      return await _activeConciergeMatchService.getCurrent();
+    } catch (error) {
+      debugPrint('Browse active match check failed: $error');
+      rethrow;
+    }
+  }
+
+  void _retryTrainers() {
+    setState(() {
+      _trainersFuture = _trainerRepository.getTrainers();
+    });
+  }
+
+  TrainerFilters get _activeFilters {
+    return _trainerFilters.copyWith(
+      service: _selectedCategory == _allCategory ? null : _selectedCategory,
+      clearService: _selectedCategory == _allCategory,
+      femaleOnly: _showFemaleOnly,
+    );
   }
 
   @override
@@ -75,46 +109,47 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
       body: SafeArea(
+        bottom: false,
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Header(),
+                const SizedBox(height: 30, child: Header(showNotifications: false)),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                _buildHeadline(context),
+                _buildHeadline(),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                _buildLocationRow(context),
+                _buildLocationRow(),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                _buildFemaleOnlyToggle(context),
+                _buildFemaleOnlyToggle(),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                _buildCategoryFilters(context),
+                _buildFilterRow(),
+
+                _buildActiveFiltersBar(),
 
                 const SizedBox(height: 16),
 
                 Text(
                   "Prices are the trainer's rate. A 5% service fee is added when you book.",
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary, height: 1.4),
+                  style: GSWTextStyles.bodySmall.copyWith(
+                    color: GSWColors.textSecondary,
+                    height: 16 / 12,
+                  ),
                 ),
 
                 const SizedBox(height: 16),
 
-                // Trainer cards...
                 _buildTrainerList(),
-
-                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -124,104 +159,103 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
     );
   }
 
-  Widget _buildHeadline(BuildContext context) {
+  // ---------------------------------------------------------------------------
+  // HEADER
+  // ---------------------------------------------------------------------------
+
+  Widget _buildHeadline() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: 'FIND YOUR ', style: Theme.of(context).textTheme.displayLarge),
-              TextSpan(
-                text: 'TRAINER ',
-                style: Theme.of(context).textTheme.displayLarge?.copyWith(color: GSWColors.primary),
-              ),
-            ],
+        Text(
+          'FIND YOUR TRAINER',
+          style: GSWTextStyles.displayLarge.copyWith(
+            fontSize: 40,
+            height: 44 / 40,
+            color: GSWColors.textPrimary,
           ),
         ),
+
         const SizedBox(height: 8),
 
         Text(
-          'We check every trainer’s ID, qualifications and references, and meet them in person.',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLocationRow(BuildContext context) {
-    return Row(
-      children: [
-        SvgPicture.asset(
-          GSWIcons.location,
-          width: GSWSizes.icon,
-          height: GSWSizes.icon,
-          colorFilter: const ColorFilter.mode(Color(0xFFDAE64B), BlendMode.srcIn),
-        ),
-
-        const SizedBox(width: 8),
-
-        Text(
-          'Dubai',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.primary),
-        ),
-
-        const SizedBox(width: 8),
-
-        Text(
-          '·',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.textDisabled),
-        ),
-
-        const SizedBox(width: 8),
-
-        Flexible(
-          fit: FlexFit.loose,
-          child: Text(
-            'Abu Dhabi and Sharjah',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
+          "We check every trainer's ID, qualifications and references before they appear here.",
+          style: GSWTextStyles.bodyMedium.copyWith(
+            color: GSWColors.textSecondary,
+            height: 20 / 14,
           ),
         ),
-        const SizedBox(width: 8),
-
-        const GSWStatusPill(label: 'Soon'),
       ],
     );
   }
 
-  Widget _buildFemaleOnlyToggle(BuildContext context) {
+  Widget _buildLocationRow() {
+    return SizedBox(
+      height: 20,
+      child: Row(
+        children: [
+          SvgPicture.asset(
+            GSWIcons.location,
+            width: GSWSizes.icon,
+            height: GSWSizes.icon,
+            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          ),
+
+          const SizedBox(width: 8),
+
+          Text(
+            'Dubai',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textAccent, height: 20 / 14),
+          ),
+
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFemaleOnlyToggle() {
     return Container(
       width: double.infinity,
-      height: 44,
+      height: 42,
       padding: const EdgeInsets.only(left: 12, right: 12),
       decoration: BoxDecoration(
         color: GSWColors.backgroundSecondary,
         border: Border.all(color: GSWColors.borderSecondary),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(GSWRadius.control),
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               'Show female trainers only',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: GSWColors.textPrimary),
+              style: GSWTextStyles.bodySmall.copyWith(
+                color: GSWColors.textPrimary,
+                height: 16 / 12,
+              ),
             ),
           ),
 
-          GSWToggle(
-            value: _showFemaleOnly,
-            onChanged: (value) {
-              setState(() {
-                _showFemaleOnly = value;
-              });
-            },
+          const SizedBox(width: 8),
+
+          SizedBox(
+            height: 26,
+            child: GSWToggle(
+              value: _showFemaleOnly,
+              onChanged: (value) {
+                setState(() {
+                  _showFemaleOnly = value;
+                });
+              },
+            ),
           ),
         ],
       ),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // FILTERS
+  // ---------------------------------------------------------------------------
 
   Future<void> _openFilters() async {
     try {
@@ -232,11 +266,7 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
       final result = await TrainerFiltersBottomSheet.show(
         context,
         trainers: trainers,
-        initialFilters: _trainerFilters.copyWith(
-          service: _selectedCategory == 'All' ? null : _selectedCategory,
-          clearService: _selectedCategory == 'All',
-          femaleOnly: _showFemaleOnly,
-        ),
+        initialFilters: _activeFilters,
       );
 
       if (result == null || !mounted) {
@@ -245,110 +275,171 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
 
       setState(() {
         _trainerFilters = result;
-
         _showFemaleOnly = result.femaleOnly;
 
-        _selectedCategory = result.service ?? 'All';
+        final service = result.service;
+        final isLiveCategory = _categories.any(
+          (category) => !category.isComingSoon && category.label == service,
+        );
+
+        _selectedCategory = isLiveCategory ? service! : _allCategory;
       });
     } catch (error) {
       debugPrint('Could not open trainer filters: $error');
     }
   }
 
-  Widget _buildCategoryFilters(BuildContext context) {
+  void _clearFilters() {
+    setState(() {
+      _trainerFilters = const TrainerFilters();
+      _showFemaleOnly = false;
+      _selectedCategory = _allCategory;
+    });
+  }
+
+  Widget _buildFilterRow() {
     return SizedBox(
-      height: 40,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
+      height: 36,
+      child: Row(
         children: [
-          InkWell(
-            onTap: _openFilters,
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: GSWColors.surfaceInteractive,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: GSWColors.borderSecondary),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SvgPicture.asset(
-                    GSWIcons.filter,
-                    width: 18,
-                    height: 18,
-                    colorFilter: const ColorFilter.mode(GSWColors.textPrimary, BlendMode.srcIn),
-                  ),
-
-                  const SizedBox(width: 8),
-
-                  Text(
-                    _filterButtonLabel,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: GSWColors.textPrimary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _FiltersButton(label: _filterButtonLabel, onTap: _openFilters),
 
           const SizedBox(width: 8),
 
-          for (int index = 0; index < _categories.length; index++) ...[
-            Builder(
-              builder: (context) {
+          Container(width: 1, height: 24, color: GSWColors.borderDisabled),
+
+          const SizedBox(width: 8),
+
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _categories.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
                 final category = _categories[index];
 
-                final isSelected = !category.isComingSoon && _selectedCategory == category.label;
-
-                return GSWFilterChip(
+                return _CategoryChip(
                   label: category.label,
                   iconPath: category.iconPath,
-                  isSelected: isSelected,
-                  isEnabled: !category.isComingSoon,
-                  trailing: category.isComingSoon ? const GSWStatusPill(label: 'Soon') : null,
+                  isComingSoon: category.isComingSoon,
+                  isSelected: !category.isComingSoon && _selectedCategory == category.label,
                   onTap: () {
-                    if (category.isComingSoon) {
-                      return;
-                    }
-
                     setState(() {
                       _selectedCategory = category.label;
+
+                      // Speciality is single-select: a category replaces any
+                      // speciality picked in the sheet. The resolved trainer
+                      // ids were computed with that speciality, so they are
+                      // dropped too (with the session filter that shared them).
+                      if (_trainerFilters.specialty != null) {
+                        _trainerFilters = _trainerFilters.copyWith(
+                          clearSpecialty: true,
+                          sessionModes: const <String>{},
+                          resolvedTrainerIds: const <String>{},
+                          restrictToResolvedTrainerIds: false,
+                        );
+                      }
                     });
                   },
                 );
               },
             ),
-
-            if (index != _categories.length - 1) const SizedBox(width: 8),
-          ],
+          ),
         ],
       ),
     );
   }
 
+  /// Shown only while a filter is on, right under the filter row where the
+  /// eye already is (Fitts's law, proximity). The result count makes the
+  /// filter's effect visible, and "Clear all" is the one obvious way back to
+  /// every trainer (Jakob's law: the pattern people know from shopping apps).
+  Widget _buildActiveFiltersBar() {
+    final count = _appliedFilterCount;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: count == 0
+          ? const SizedBox(width: double.infinity)
+          : Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: FutureBuilder<List<Trainer>>(
+                future: _trainersFuture,
+                builder: (context, snapshot) {
+                  final trainers = snapshot.data;
+                  final shown = trainers?.where(_activeFilters.matchesTrainer).length;
+
+                  final summary = shown == null
+                      ? (count == 1 ? '1 filter on' : '$count filters on')
+                      : 'Showing $shown of ${trainers!.length} ${trainers.length == 1 ? 'trainer' : 'trainers'}';
+
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          summary,
+                          style: GSWTextStyles.bodySmall.copyWith(
+                            color: GSWColors.textSecondary,
+                            height: 16 / 12,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _ClearFiltersButton(onTap: _clearFilters),
+                    ],
+                  );
+                },
+              ),
+            ),
+    );
+  }
+
+  int get _appliedFilterCount {
+    final filters = _activeFilters;
+    var count = 0;
+
+    if (filters.service != null || filters.specialty != null) count++;
+    if (filters.areas.isNotEmpty) count++;
+    if (filters.femaleOnly || filters.languages.isNotEmpty) count++;
+    if (filters.sessionModes.isNotEmpty) count++;
+    if (filters.hasPriceFilter) count++;
+
+    return count;
+  }
+
   String get _filterButtonLabel {
     final count = _appliedFilterCount;
 
-    if (count == 0) {
-      return 'Filters';
-    }
-
-    return 'Filters ($count)';
+    return count == 0 ? 'Filters' : 'Filters ($count)';
   }
 
-  Widget _buildMatchingCardIfAllowed() {
-    return FutureBuilder<bool>(
-      future: _activeConciergeMatchService.hasActiveMatch(),
+  // ---------------------------------------------------------------------------
+  // LIST
+  // ---------------------------------------------------------------------------
+
+  Widget _buildMatchingCard() {
+    return FutureBuilder<ActiveConciergeMatch?>(
+      future: _activeMatchFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting ||
-            snapshot.hasError ||
-            snapshot.data == true) {
+        if (snapshot.connectionState != ConnectionState.done || snapshot.hasError) {
+          // If we cannot confirm whether a request is open, keep the entry
+          // point hidden rather than risk a second request.
           return const SizedBox.shrink();
+        }
+
+        final activeMatch = snapshot.data;
+
+        if (activeMatch != null) {
+          return TrainerMatchingCard.requestOpen(
+            onTap: () {
+              context.push(
+                activeMatch.isMatched ? GSWRoutes.yourMatch : GSWRoutes.conciergeRequestStatus,
+                extra: activeMatch.id,
+              );
+            },
+          );
         }
 
         return TrainerMatchingCard(
@@ -374,46 +465,66 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
         }
 
         if (snapshot.hasError) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Text(
-              'Unable to load trainers right now.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
-            ),
+          debugPrint('Trainers load failed: ${snapshot.error}');
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'We could not load trainers. Check your connection and try again.',
+                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+              ),
+
+              const SizedBox(height: 16),
+
+              GSWButton(
+                label: 'Try again',
+                variant: GSWButtonVariant.secondary,
+                size: GSWButtonSize.medium,
+                onPressed: _retryTrainers,
+              ),
+            ],
           );
         }
 
-        final trainers = snapshot.data ?? [];
-
-        final activeFilters = _trainerFilters.copyWith(
-          service: _selectedCategory == 'All' ? null : _selectedCategory,
-          clearService: _selectedCategory == 'All',
-          femaleOnly: _showFemaleOnly,
-        );
-
-        final filteredTrainers = trainers.where(activeFilters.matchesTrainer).toList();
+        final trainers = snapshot.data ?? const <Trainer>[];
+        final filteredTrainers = trainers.where(_activeFilters.matchesTrainer).toList();
 
         if (filteredTrainers.isEmpty) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                trainers.isEmpty ? 'No trainers yet' : 'No trainers match',
+                style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
+              ),
+
               const SizedBox(height: 8),
 
-              Center(
-                child: Text(
-                  'No trainers match these filters.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: GSWColors.textSecondary),
+              Text(
+                trainers.isEmpty
+                    ? 'New trainers are being checked. Tell us what you need and we will help you find someone.'
+                    : 'Try removing a filter, or tell us what you need and a real person will help.',
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  color: GSWColors.textSecondary,
+                  height: 20 / 14,
                 ),
               ),
 
-              const SizedBox(height: 20),
+              if (trainers.isNotEmpty) ...[
+                const SizedBox(height: 16),
 
-              _buildMatchingCardIfAllowed(),
+                GSWButton(
+                  label: 'Clear filters',
+                  variant: GSWButtonVariant.secondary,
+                  size: GSWButtonSize.medium,
+                  onPressed: _clearFilters,
+                ),
+              ],
+
+              const SizedBox(height: 16),
+
+              _buildMatchingCard(),
             ],
           );
         }
@@ -421,26 +532,12 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
         return Column(
           children: [
             for (int index = 0; index < filteredTrainers.length; index++) ...[
-              Builder(
-                builder: (context) {
-                  final trainer = filteredTrainers[index];
+              _buildTrainerCard(filteredTrainers[index]),
 
-                  return TrainerCard(
-                    name: trainer.fullName,
-                    service: trainer.primaryService ?? 'Personal Training',
-                    location: trainer.serviceArea ?? 'Dubai',
-                    price: trainer.pricePerSession ?? 0,
-                    languages: trainer.languages,
-                    imageUrl: trainer.profileImageUrl,
-                    verificationChecks: trainer.verificationChecks,
-                    onTap: () {
-                      context.push(GSWRoutes.trainerProfile, extra: trainer);
-                    },
-                  );
-                },
-              ),
-              if (index == 0) ...[const SizedBox(height: 24), _buildMatchingCardIfAllowed()],
-              if (index != filteredTrainers.length - 1) const SizedBox(height: 24),
+              // Help me choose sits after the first card (8.1).
+              if (index == 0) ...[const SizedBox(height: 16), _buildMatchingCard()],
+
+              if (index != filteredTrainers.length - 1) const SizedBox(height: 16),
             ],
           ],
         );
@@ -448,33 +545,197 @@ class _BrowseTrainersScreenState extends State<BrowseTrainersScreen> {
     );
   }
 
-  int get _appliedFilterCount {
-    var count = 0;
+  Widget _buildTrainerCard(Trainer trainer) {
+    return TrainerCard(
+      name: trainer.fullName,
+      service: trainer.primaryService ?? '',
+      location: trainer.serviceArea?.trim().isNotEmpty == true ? trainer.serviceArea! : 'Dubai',
+      price: trainer.pricePerSession,
+      languages: trainer.languages,
+      imageUrl: trainer.profileImageUrl,
+      verificationChecks: trainer.verificationChecks,
+      onTap: () {
+        context.push(GSWRoutes.trainerProfile, extra: trainer);
+      },
+    );
+  }
+}
 
-    if (_trainerFilters.service != null) {
-      count++;
+/// Figma "Filters button": 36px tall, 14px sides, 16px filter icon, 8px gap,
+/// label Medium 14 white on Surface/Interactive.
+class _FiltersButton extends StatelessWidget {
+  const _FiltersButton({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(GSWRadius.full),
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: GSWColors.surfaceInteractive,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
+            border: Border.all(color: GSWColors.borderSecondary),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SvgPicture.asset(
+                GSWIcons.filter,
+                width: GSWSizes.icon,
+                height: GSWSizes.icon,
+                colorFilter: const ColorFilter.mode(GSWColors.iconPrimary, BlendMode.srcIn),
+              ),
+
+              const SizedBox(width: 8),
+
+              Text(
+                label,
+                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary, height: 1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Category chip from 8.1: 36px tall, min width 72, 18px sides, optional 16px
+/// icon and a "Soon" pill. Coming-soon chips use a dashed border and do nothing.
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.label,
+    required this.isSelected,
+    required this.isComingSoon,
+    required this.onTap,
+    this.iconPath,
+  });
+
+  final String label;
+  final String? iconPath;
+  final bool isSelected;
+  final bool isComingSoon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final contentColor = isSelected
+        ? GSWColors.textInverse
+        : isComingSoon
+        ? GSWColors.textTertiary
+        : GSWColors.textPrimary;
+
+    final chip = AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      height: 36,
+      constraints: const BoxConstraints(minWidth: 72),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      decoration: BoxDecoration(
+        color: isSelected ? GSWColors.primary : GSWColors.backgroundPrimary,
+        borderRadius: BorderRadius.circular(GSWRadius.full),
+        border: isComingSoon
+            ? null
+            : Border.all(color: isSelected ? GSWColors.primary : GSWColors.borderSecondary),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (iconPath != null) ...[
+            SvgPicture.asset(
+              iconPath!,
+              width: GSWSizes.icon,
+              height: GSWSizes.icon,
+              colorFilter: ColorFilter.mode(contentColor, BlendMode.srcIn),
+            ),
+
+            const SizedBox(width: 8),
+          ],
+
+          Text(
+            label,
+            style: GSWTextStyles.labelMedium.copyWith(color: contentColor, height: 1),
+          ),
+
+          if (isComingSoon) ...[const SizedBox(width: 8), const GSWStatusPill(label: 'Soon')],
+        ],
+      ),
+    );
+
+    if (isComingSoon) {
+      return Semantics(
+        enabled: false,
+        label: '$label, coming soon',
+        child: GSWDashedBorder(
+          color: GSWColors.borderSecondary,
+          radius: GSWRadius.full,
+          strokeWidth: 1,
+          dashWidth: 4,
+          dashGap: 4,
+          child: chip,
+        ),
+      );
     }
 
-    if (_trainerFilters.specialty != null) {
-      count++;
-    }
+    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: chip);
+  }
+}
 
-    if (_trainerFilters.areas.isNotEmpty) {
-      count++;
-    }
+/// "Clear all" pill: 36 tall with a 44 tall tap area, accent text and a
+/// small close icon so it reads as "remove", not "apply".
+class _ClearFiltersButton extends StatelessWidget {
+  const _ClearFiltersButton({required this.onTap});
 
-    if (_trainerFilters.femaleOnly || _trainerFilters.languages.isNotEmpty) {
-      count++;
-    }
+  final VoidCallback onTap;
 
-    if (_trainerFilters.sessionModes.isNotEmpty) {
-      count++;
-    }
-
-    if (_trainerFilters.minPrice > 150 || _trainerFilters.maxPrice < 400) {
-      count++;
-    }
-
-    return count;
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Clear all filters',
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(GSWRadius.full),
+              border: Border.all(color: GSWColors.primary),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SvgPicture.asset(
+                  GSWIcons.close,
+                  width: 10,
+                  height: 10,
+                  colorFilter: const ColorFilter.mode(GSWColors.textAccent, BlendMode.srcIn),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Clear all',
+                  style: GSWTextStyles.labelMedium.copyWith(
+                    color: GSWColors.textAccent,
+                    height: 16 / 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

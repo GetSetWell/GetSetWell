@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/routing/gsw_routes.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
+import 'legal_document_parts.dart';
 
+/// 12.5b Privacy Policy (Figma 1069:3530, full text 1107:3710). Text is v1.2.
 class PrivacyPolicyScreen extends StatefulWidget {
-  const PrivacyPolicyScreen({super.key, this.onReadArabic});
+  const PrivacyPolicyScreen({super.key, this.onReadArabic, this.embedded = false});
 
   final VoidCallback? onReadArabic;
+
+  /// True when shown inside the sign-up legal sheet (Figma 12.5c): only the
+  /// document body is built. The sheet supplies its own title, version,
+  /// scrolling and close controls.
+  final bool embedded;
 
   @override
   State<PrivacyPolicyScreen> createState() => _PrivacyPolicyScreenState();
@@ -45,12 +53,13 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
       paragraphs: ['3.1  When you create an account'],
       bullets: [
         'your name',
-        'your mobile number, which we verify with a one-time code sent by WhatsApp',
+        'your mobile number, which we verify with a one-time code sent by SMS',
         'your confirmation that you are 18 or over',
+        'your email address, only if you choose to add one. We use it to send your receipts and never share it with trainers',
+        'a profile photo, only if you choose to add one',
       ],
       trailingParagraphs: ['3.2  What we do not ask for'],
       trailingBullets: [
-        'your email address, unless you choose to email us',
         'which emirate you live in, because we currently operate in Dubai only',
         'your date of birth',
         'your device location. We do not track where you are.',
@@ -127,18 +136,18 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
         'The table shows what we use personal data for, and what allows us to under the PDPL.',
       ],
       bullets: [
-        'Create and verify your account — Needed to provide the service you asked for',
-        'Match you with a trainer — Needed to provide the service',
-        'Arrange and manage bookings, reminders and rescheduling — Needed to provide the service',
-        'Share booking details with your trainer — Needed to provide the service',
-        'Arrange payments and refunds through our payment provider — Needed to provide the service',
-        'Confirm whether sessions took place, and decide disagreements — Needed to provide the service, and to establish or defend legal claims',
-        'Work out the commission a trainer owes us, including asking you whether you have trained with a trainer we introduced — Needed for our agreements with trainers. Answering our question is always optional for you.',
-        'Handle complaints, incidents and safety concerns — Needed to provide the service, to protect someone\'s vital interests, and to establish or defend legal claims',
-        'Send you messages about your account and bookings — Needed to provide the service',
-        'Send you marketing — Your consent, which you can withdraw at any time',
-        'Keep financial and tax records, and respond to authorities — Our legal obligations',
-        'Review trainers, and run their Bookings, Payouts and invoices — Needed to perform our agreement with the trainer, and our legal obligations',
+        'Create and verify your account: Needed to provide the service you asked for',
+        'Match you with a trainer: Needed to provide the service',
+        'Arrange and manage bookings, reminders and rescheduling: Needed to provide the service',
+        'Share booking details with your trainer: Needed to provide the service',
+        'Arrange payments and refunds through our payment provider: Needed to provide the service',
+        'Confirm whether sessions took place, and decide disagreements: Needed to provide the service, and to establish or defend legal claims',
+        'Work out the commission a trainer owes us, including asking you whether you have trained with a trainer we introduced: Needed for our agreements with trainers. Answering our question is always optional for you.',
+        'Handle complaints, incidents and safety concerns: Needed to provide the service, to protect someone\'s vital interests, and to establish or defend legal claims',
+        'Send you messages about your account and bookings: Needed to provide the service',
+        'Send you marketing: Your consent, which you can withdraw at any time',
+        'Keep financial and tax records, and respond to authorities: Our legal obligations',
+        'Review trainers, and run their Bookings, Payouts and invoices: Needed to perform our agreement with the trainer, and our legal obligations',
       ],
       trailingParagraphs: [
         '6.1  No decisions by computer alone. A person reads every request. We do not make decisions about you by automated means alone.',
@@ -148,7 +157,7 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
       number: '07',
       title: 'Messages from us',
       paragraphs: [
-        '7.1  Service messages. We send messages about your account and bookings in the app, by push notification and by WhatsApp, including your verification codes. If you turn push notifications off, we will use WhatsApp for messages you need about a booking.',
+        '7.1  Service messages. We send messages about your account and bookings in the app, by push notification and by WhatsApp. Your verification codes are sent by SMS. If you turn push notifications off, we will use WhatsApp for messages you need about a booking.',
         '7.2  Marketing. We send marketing only if you have agreed to it. You can stop it at any time by replying to any marketing message or by telling us.',
         '7.3  WhatsApp is operated by Meta. Messages pass through its systems, and its own terms and privacy policy apply.',
       ],
@@ -162,12 +171,12 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
         '8.3  Service providers who help us run GetSetWell and use personal data only on our instructions:',
       ],
       bullets: [
-        'Supabase — Our database and account verification',
-        'Our messaging provider — Sending verification codes by WhatsApp',
-        'GoDaddy — Hosting our website',
-        'Titan — Our email',
-        'Meta (WhatsApp) — Messaging',
-        'Apple and Google — Push notifications',
+        'Supabase: Our database and account verification',
+        'Google (Firebase Authentication): Sending verification codes by SMS',
+        'GoDaddy: Hosting our website',
+        'Titan: Our email',
+        'Meta (WhatsApp): Messaging',
+        'Apple and Google: Push notifications',
       ],
       trailingParagraphs: [
         '8.4  Professional advisers, such as our lawyers and accountants, who are bound to keep it confidential.',
@@ -181,13 +190,13 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
       title: 'Where your data is stored',
       paragraphs: ['9.1  Some of our providers store or process data outside the UAE:'],
       bullets: [
-        'Supabase — Outside the UAE',
-        'GoDaddy — Outside the UAE',
-        'Titan — Outside the UAE',
-        'Meta (WhatsApp) — Outside the UAE',
-        'Our messaging provider — Outside the UAE',
-        'Apple and Google — Outside the UAE',
-        'Our payment provider — As set out in its own privacy policy',
+        'Supabase: Outside the UAE',
+        'GoDaddy: Outside the UAE',
+        'Titan: Outside the UAE',
+        'Meta (WhatsApp): Outside the UAE',
+        'Our messaging provider: Outside the UAE',
+        'Apple and Google: Outside the UAE',
+        'Our payment provider: As set out in its own privacy policy',
       ],
       trailingParagraphs: [
         '9.2  Where personal data leaves the UAE, we transfer it only as the PDPL allows: for example, to a country with adequate data protection, under contractual safeguards, or where the transfer is needed to perform our agreement with you.',
@@ -197,17 +206,17 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
       number: '10',
       title: 'How long we keep it',
       bullets: [
-        'Your account details — While your account is open, then deleted within 30 days of closure, except as below',
-        'Requests and our matching notes — 12 months from the request',
-        'Which trainer we introduced you to, and when — For as long as commission can arise from that introduction, then as part of our financial records',
-        'Health information you gave us without being asked — Up to 30 days after the related request or booking ends',
-        'Booking, payment, refund and commission records — 7 years from the end of the tax period they relate to',
-        'Records of attendance and disagreements — 2 years from the session, or longer if a claim is made',
-        'Reports of injuries and incidents — Until the time for bringing a claim has passed',
-        'Messages with us — 2 years from our last contact',
-        'Marketing consent — Until you withdraw it',
-        'Trainer records — While the trainer is on GetSetWell, then for as long as our financial records and possible claims require, up to 7 years',
-        'Technical logs — 12 months',
+        'Your account details: While your account is open, then deleted within 30 days of closure, except as below',
+        'Requests and our matching notes: 12 months from the request',
+        'Which trainer we introduced you to, and when: For as long as commission can arise from that introduction, then as part of our financial records',
+        'Health information you gave us without being asked: Up to 30 days after the related request or booking ends',
+        'Booking, payment, refund and commission records: 7 years from the end of the tax period they relate to',
+        'Records of attendance and disagreements: 2 years from the session, or longer if a claim is made',
+        'Reports of injuries and incidents: Until the time for bringing a claim has passed',
+        'Messages with us: 2 years from our last contact',
+        'Marketing consent: Until you withdraw it',
+        'Trainer records: While the trainer is on GetSetWell, then for as long as our financial records and possible claims require, up to 7 years',
+        'Technical logs: 12 months',
       ],
     ),
     _LegalSection(
@@ -224,7 +233,7 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
         'stop relying on your consent, where we rely on it',
       ],
       trailingParagraphs: [
-        '11.2  How to ask. Email info@getsetwell.com. To protect you, we may ask you to confirm your identity, for example with a code sent by WhatsApp to the mobile number on your account.',
+        '11.2  How to ask. Email info@getsetwell.com. To protect you, we may ask you to confirm your identity, for example with a code sent by SMS to the mobile number on your account.',
         '11.3  How quickly we respond. We reply within 3 business days (Monday to Friday, excluding UAE public holidays). We complete your request within 30 days. If it will take longer, we tell you why. There is no charge.',
         '11.4  If you are not satisfied, you can complain to the UAE Data Office.',
       ],
@@ -374,7 +383,7 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
           elevation: 0,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
         ),
@@ -385,82 +394,62 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
   Widget build(BuildContext context) {
     final visibleIndexes = _visibleIndexes;
 
-    return Scaffold(
-      backgroundColor: GSWColors.backgroundPrimary,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTopBar(context),
-
-            Expanded(
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
-                  child: Column(
+    final content = Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Privacy Policy',
-                        style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      Text(
-                        'Version 1.2 · 28 September 2026',
-                        style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'What personal data we collect, why we use it, who sees it, and your rights under UAE law.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                          height: 1.45,
+                      if (!widget.embedded) ...[
+                      const LegalDocTitle(
+                          title: 'Privacy Policy',
+                          version: 'Version 1.3 · 14 October 2026',
+                          intro:
+                              'What personal data we collect, why we use it, who sees it, and your rights under UAE law.',
                         ),
-                      ),
+  
+                        const SizedBox(height: kLegalBlockGap),
+                      ],
 
-                      const SizedBox(height: 24),
 
-                      _buildShortVersionCard(),
-
-                      const SizedBox(height: 24),
-
-                      _buildSearchField(),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Text(
-                            _allExpanded
-                                ? 'All 18 sections, expanded'
-                                : '${_expandedSections.length} of 18 sections expanded',
-                            style: GSWTextStyles.labelMedium.copyWith(
-                              color: GSWColors.textSecondary,
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          GestureDetector(
-                            onTap: _toggleAll,
-                            behavior: HitTestBehavior.opaque,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                _allExpanded ? 'Collapse all' : 'Expand all',
-                                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.primary),
-                              ),
-                            ),
-                          ),
+                      const LegalShortVersionCard(
+                        points: [
+                          'To create your account we ask for your name and mobile number. Email is optional and only used for receipts. No date of birth, and we never track your location.',
+                          'We don\'t ask about your health. Please don\'t put health details in a request or message.',
+                          'Your trainer gets your name and number only when you book with them.',
+                          'Card details go straight to our payment provider. We never see or store them.',
+                          'We don\'t sell your data, and we don\'t share it with advertisers.',
+                          'You can ask for a copy of your data, or for it to be deleted, at any time.',
                         ],
+                        footnote: 'A summary to help you. The full policy below is what applies.',
                       ),
 
-                      const SizedBox(height: 8),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSearchField(
+                        controller: _searchController,
+                        hintText: 'Search the policy',
+                        onChanged: (value) {
+                          setState(() {
+                            _searchQuery = value;
+                          });
+                        },
+                        onClear: () {
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                          });
+                        },
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+
+                      LegalSectionsHeader(
+                        label: _allExpanded
+                            ? 'All ${_sections.length} sections, expanded'
+                            : 'All ${_sections.length} sections',
+                        allExpanded: _allExpanded,
+                        onToggle: _toggleAll,
+                      ),
+
+                      const SizedBox(height: 4),
 
                       if (visibleIndexes.isEmpty)
                         Padding(
@@ -474,415 +463,86 @@ class _PrivacyPolicyScreenState extends State<PrivacyPolicyScreen> {
                             ),
                           ),
                         )
-                      else
+                      else ...[
+                        const LegalDivider(),
                         for (final index in visibleIndexes) ...[
                           _buildSection(index, _sections[index]),
-
-                          if (index != visibleIndexes.last)
-                            const Divider(height: 1, color: GSWColors.borderSecondary),
+                          const LegalDivider(),
                         ],
-                      const SizedBox(height: 32),
+                      ],
 
-                      _buildFooter(),
+                      const SizedBox(height: kLegalBlockGap),
+
+                      // Inside the sign-up sheet, links would open pages under the sheet.
+                      if (!widget.embedded) ...[
+                      LegalReadWith(
+                        links: [
+                          LegalLink(
+                            'Terms of Service',
+                            () => context.push(GSWRoutes.termsOfService),
+                          ),
+                          LegalLink(
+                            'Cancellation and Refunds Policy',
+                            () => context.push(GSWRoutes.cancellationAndRefund),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: kLegalBlockGap),
+                      ],
+
+                      const LegalDocFooter(
+                        contactHeading: 'Privacy questions and requests',
+                        contactLine: 'info@getsetwell.com',
+                      ),
                     ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+                  );
 
-  Widget _buildBackButton(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (context.canPop()) {
-            context.pop();
-          }
-        },
-        customBorder: const CircleBorder(),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: GSWColors.borderSecondary),
-          ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
-        ),
-      ),
-    );
-  }
+    if (widget.embedded) return content;
 
-  Widget _buildTopBar(BuildContext context) {
-    return SizedBox(
-      height: 54,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
+    return Scaffold(
+      backgroundColor: GSWColors.backgroundPrimary,
+      body: SafeArea(
+        child: Column(
           children: [
-            _buildBackButton(context),
+            LegalDocTopBar(onReadArabic: _handleReadArabic),
 
-            const Spacer(),
-
-            TextButton(
-              onPressed: _handleReadArabic,
-              style: TextButton.styleFrom(
-                foregroundColor: GSWColors.textPrimary,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-              ),
-              child: Text(
-                'Read in Arabic',
-                style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textPrimary),
+            Expanded(
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  padding: kLegalContentPadding,
+                  child: content,
+                ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortVersionCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'THE SHORT VERSION',
-            style: GSWTextStyles.labelSmall.copyWith(
-              color: GSWColors.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          _summaryItem(
-            'To create your account we ask for your name and mobile number. No email, no date of birth, and we never track your location.',
-          ),
-          _summaryItem(
-            'We don\'t ask about your health. Please don\'t put health details in a request or message.',
-          ),
-          _summaryItem('Your trainer gets your name and number only when you book with them.'),
-          _summaryItem(
-            'Card details go straight to our payment provider. We never see or store them.',
-          ),
-          _summaryItem('We don\'t sell your data, and we don\'t share it with advertisers.'),
-          _summaryItem(
-            'You can ask for a copy of your data, or for it to be deleted, at any time.',
-          ),
-
-          const SizedBox(height: 8),
-
-          Text(
-            'A summary to help you. The full policy below is what applies.',
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _summaryItem(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 11),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 1.45),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchField() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: GSWColors.borderSecondary),
-      ),
-      child: TextField(
-        controller: _searchController,
-        cursorColor: GSWColors.primary,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: 'Search the policy',
-          hintStyle: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-          prefixIcon: const Icon(Icons.search_rounded, color: GSWColors.textSecondary, size: 20),
-          suffixIcon: _searchQuery.isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                  icon: const Icon(Icons.close_rounded, color: GSWColors.textSecondary, size: 18),
-                ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 13),
         ),
       ),
     );
   }
 
   Widget _buildSection(int index, _LegalSection section) {
-    final expanded = _expandedSections.contains(index);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => _toggleSection(index),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 28,
-                  child: Text(
-                    section.number,
-                    style: GSWTextStyles.titleSmall.copyWith(
-                      color: GSWColors.primary,
-                      fontFamily: 'BebasNeue',
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      section.title,
-                      style: GSWTextStyles.labelLarge.copyWith(
-                        color: GSWColors.textPrimary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Icon(
-                  expanded ? Icons.remove_rounded : Icons.add_rounded,
-                  size: 20,
-                  color: GSWColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-
-          if (expanded) ...[
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final paragraph in section.paragraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.bullets) _bullet(bullet),
-
-                  for (final paragraph in section.trailingParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.trailingBullets) _bullet(bullet),
-
-                  for (final paragraph in section.secondaryParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.secondaryBullets) _bullet(bullet),
-
-                  for (final paragraph in section.tertiaryParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.tertiaryBullets) _bullet(bullet),
-
-                  for (final paragraph in section.finalParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.finalBullets) _bullet(bullet),
-
-                  for (final paragraph in section.endingParagraphs) _paragraph(paragraph),
-
-                  for (final bullet in section.endingBullets) _bullet(bullet),
-
-                  for (final paragraph in section.lastParagraphs) _paragraph(paragraph),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _paragraph(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Text(
-        text,
-        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-      ),
-    );
-  }
-
-  Widget _bullet(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 7),
-            child: Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
-            ),
-          ),
-
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Text(
-              text,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooterLink({required String label, required VoidCallback onTap}) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-                ),
-              ),
-
-              const Icon(Icons.chevron_right_rounded, color: GSWColors.textSecondary, size: 26),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _footerDivider() {
-    return const Divider(height: 1, color: GSWColors.borderSecondary);
-  }
-
-  Widget _buildFooter() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return LegalAccordionSection(
+      number: section.number,
+      title: section.title,
+      expanded: _expandedSections.contains(index),
+      onTap: () => _toggleSection(index),
       children: [
-        Text(
-          'READ WITH THESE',
-          style: GSWTextStyles.labelMedium.copyWith(
-            color: GSWColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        _buildFooterLink(
-          label: 'Terms of Service',
-          onTap: () {
-            context.push(GSWRoutes.termsOfService);
-          },
-        ),
-
-        _footerDivider(),
-
-        _buildFooterLink(
-          label: 'Cancellation and Refunds Policy',
-          onTap: () {
-            context.push(GSWRoutes.cancellationAndRefund);
-          },
-        ),
-        _footerDivider(),
-        _buildFooterLink(
-          label: 'Prohibited Services Policy',
-          onTap: () {
-            context.push(GSWRoutes.prohibitedServices);
-          },
-        ),
-        _footerDivider(),
-        const SizedBox(height: 24),
-
-        Text(
-          'Privacy questions and requests',
-          style: GSWTextStyles.labelLarge.copyWith(
-            color: GSWColors.textPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          'info@getsetwell.com · WhatsApp +971 50 525 1393',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.primary),
-        ),
-
-        const SizedBox(height: 24),
-
-        Text(
-          'Published in Arabic and English. If the two differ, the Arabic version applies. Get Set Fit LLC, licence 2541939, Sharjah Media City (Shams).',
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-        ),
+        for (final paragraph in section.paragraphs) LegalParagraph(paragraph),
+        for (final bullet in section.bullets) LegalBullet(bullet),
+        for (final paragraph in section.trailingParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.trailingBullets) LegalBullet(bullet),
+        for (final paragraph in section.secondaryParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.secondaryBullets) LegalBullet(bullet),
+        for (final paragraph in section.tertiaryParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.tertiaryBullets) LegalBullet(bullet),
+        for (final paragraph in section.finalParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.finalBullets) LegalBullet(bullet),
+        for (final paragraph in section.endingParagraphs) LegalParagraph(paragraph),
+        for (final bullet in section.endingBullets) LegalBullet(bullet),
+        for (final paragraph in section.lastParagraphs) LegalParagraph(paragraph),
       ],
     );
   }

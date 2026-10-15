@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
+import 'package:mobile/features/sessions/presentation/widgets/session_ui.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 Future<void> showSessionConfirmationFlow({
@@ -10,13 +13,11 @@ Future<void> showSessionConfirmationFlow({
   required Future<void> Function(Map<String, dynamic> session) onBookAgain,
   Future<void> Function()? onFinished,
 }) async {
-  while (context.mounted) {
+  while (true) {
     if (!context.mounted) return;
-    final firstAnswer = await showModalBottomSheet<_AttendanceAnswer>(
+
+    final firstAnswer = await showSessionSheet<_AttendanceAnswer>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.72),
       builder: (context) => _AttendanceSheet(session: session),
     );
 
@@ -67,15 +68,17 @@ Future<void> _showExperienceSheet(
   Map<String, dynamic> session,
   Future<void> Function(Map<String, dynamic>) onBookAgain,
 ) async {
-  final experience = await showModalBottomSheet<_ExperienceAnswer>(
+  final experience = await showSessionSheet<_ExperienceAnswer>(
     context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.72),
     builder: (context) => _ExperienceSheet(session: session),
   );
 
-  if (!context.mounted || experience == null) {
+  if (!context.mounted) return;
+
+  // Dismissing "How did it go?" must not lose the "it took place" answer:
+  // record it as took_place_fine (the neutral answer) and stop there.
+  if (experience == null) {
+    await _submitSessionOutcome(context, session, outcome: 'took_place_fine', quiet: true);
     return;
   }
 
@@ -88,8 +91,8 @@ Future<void> _showExperienceSheet(
           context,
           session,
           title: 'Glad it went well',
-          subtitle:
-              'Ready for another session with ${_trainerName(session)}? Choose any available day and time.',
+          subtitle: 'Same time next week with ${_trainerFirstName(session)}?',
+          primaryIsBookAgain: true,
           onBookAgain: onBookAgain,
         );
       }
@@ -104,7 +107,8 @@ Future<void> _showExperienceSheet(
           session,
           title: 'Thanks for telling us',
           subtitle:
-              'If you’d like another session with ${_trainerName(session)}, choose any available day and time.',
+              "If you'd like another session with ${_trainerFirstName(session)}, this slot is free next week.",
+          primaryIsBookAgain: false,
           onBookAgain: onBookAgain,
         );
       }
@@ -120,15 +124,16 @@ Future<void> _showNotWhatIHopedSheet(BuildContext context, Map<String, dynamic> 
   while (true) {
     if (!context.mounted) return;
 
-    final result = await showModalBottomSheet<_NotHopedResult>(
+    final result = await showSessionSheet<_NotHopedResult>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.72),
-      builder: (context) => const _NotWhatIHopedSheet(),
+      builder: (context) => _NotWhatIHopedSheet(session: session),
     );
 
-    if (!context.mounted || result == null) {
+    if (!context.mounted) return;
+
+    if (result == null) {
+      // "Not now": the session still took place.
+      await _submitSessionOutcome(context, session, outcome: 'took_place_fine', quiet: true);
       return;
     }
 
@@ -170,7 +175,10 @@ Future<bool> _openIssuePage(
 }) async {
   final result = await Navigator.of(context).push<_IssueReportResult>(
     MaterialPageRoute(
-      builder: (context) => _SessionIssueReportPage(initialCategory: initialCategory),
+      builder: (context) => _SessionIssueReportPage(
+        session: session,
+        initialCategory: initialCategory,
+      ),
     ),
   );
 
@@ -193,75 +201,20 @@ Future<bool> _openIssuePage(
 }
 
 Future<void> _showReportSubmittedSheet(BuildContext context, Map<String, dynamic> session) async {
-  final trainerName = _trainerName(session);
+  final trainer = SessionTrainerInfo.fromSession(session);
 
-  await showModalBottomSheet<void>(
+  await showSessionSheet<void>(
     context: context,
-    isScrollControlled: true,
-    isDismissible: false,
-    enableDrag: false,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.72),
-    builder: (context) {
-      return _SessionBottomSheetFrame(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: GSWColors.surfacePrimary,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              alignment: Alignment.center,
-              child: const Icon(Icons.check_rounded, color: GSWColors.primary, size: 28),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Report sent',
-              style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
-            ),
-
-            const SizedBox(height: 12),
-
-            Text(
-              'Thanks for telling us what happened with your session with $trainerName.',
-              style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary, height: 1.5),
-            ),
-
-            const SizedBox(height: 16),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: GSWColors.surfacePrimary,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Text(
-                'We’ll review the session and follow up if we need anything else from you.',
-                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 1.5),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            GSWButton(
-              label: 'Done',
-              variant: GSWButtonVariant.primary,
-              size: GSWButtonSize.large,
-              onPressed: () {
-                Navigator.pop(context);
-              },
-            ),
-          ],
+    builder: (context) => SessionSheetFrame(
+      children: [
+        const SessionSheetHeading('Report sent'),
+        SessionSheetIntro(
+          'Thanks for telling us about your session with ${trainer.firstName}. '
+          'A real person reads every report. We reply the same day if you write before 6:00 PM.',
         ),
-      );
-    },
+        GSWButton(label: 'Done', onPressed: () => Navigator.pop(context)),
+      ],
+    ),
   );
 }
 
@@ -271,6 +224,7 @@ Future<bool> _submitSessionOutcome(
   required String outcome,
   String? feedbackCategory,
   String? feedbackNote,
+  bool quiet = false,
 }) async {
   final sessionId = session['id']?.toString().trim() ?? '';
 
@@ -293,7 +247,9 @@ Future<bool> _submitSessionOutcome(
   } catch (error) {
     debugPrint('Submit session outcome failed: $error');
 
-    if (context.mounted) {
+    if (error.toString().contains('SESSION_OUTCOME_ALREADY_SUBMITTED')) return true;
+
+    if (context.mounted && !quiet) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -317,14 +273,17 @@ Future<void> _showRebookSheet(
   Map<String, dynamic> session, {
   required String title,
   required String subtitle,
+  required bool primaryIsBookAgain,
   required Future<void> Function(Map<String, dynamic>) onBookAgain,
 }) async {
-  final shouldBookAgain = await showModalBottomSheet<bool>(
+  final shouldBookAgain = await showSessionSheet<bool>(
     context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.72),
-    builder: (context) => _RebookSheet(session: session, title: title, subtitle: subtitle),
+    builder: (context) => _RebookSheet(
+      session: session,
+      title: title,
+      subtitle: subtitle,
+      primaryIsBookAgain: primaryIsBookAgain,
+    ),
   );
 
   if (!context.mounted || shouldBookAgain != true) {
@@ -352,6 +311,16 @@ class _IssueReportResult {
   final String? note;
 }
 
+// =============================================================================
+// Sheets (11.1, 11.2, 11.2b to 11.2d) and the report page (11.3)
+// =============================================================================
+
+String _sessionLine(Map<String, dynamic> session) {
+  final start = sessionStartDubai(session);
+  final name = SessionTrainerInfo.fromSession(session).name;
+  return start == null ? name : '$name, ${GSWTime.dayLong(start)}, ${GSWTime.time(start)}';
+}
+
 class _AttendanceSheet extends StatelessWidget {
   const _AttendanceSheet({required this.session});
 
@@ -359,63 +328,29 @@ class _AttendanceSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
-
-    final trainer = session['trainers'];
-
-    final trainerName = trainer is Map
-        ? trainer['full_name']?.toString().trim() ?? 'Your trainer'
-        : 'Your trainer';
-
-    final local = scheduledAt == null ? null : _toDubai(scheduledAt);
-
-    final sessionLabel = local == null
-        ? trainerName
-        : '$trainerName, ${_longDate(local)}, ${_timeLabel(local)}';
-
-    return _SessionBottomSheetFrame(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Did your session take place?',
-            style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            sessionLabel,
-            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
-          ),
-          const SizedBox(height: 28),
-          GSWButton(
-            label: 'Yes, it took place',
-            variant: GSWButtonVariant.primary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _AttendanceAnswer.tookPlace),
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            label: 'No, it did not',
-            variant: GSWButtonVariant.secondary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _AttendanceAnswer.didNotTakePlace),
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            label: 'It was cut short',
-            variant: GSWButtonVariant.secondary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _AttendanceAnswer.cutShort),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'This is what pays your trainer. If we don’t hear from either of you within 24 hours of the end, we treat it as done. You can still tell us about a problem after that.',
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-          ),
-        ],
-      ),
+    return SessionSheetFrame(
+      children: [
+        const SessionSheetHeading('Did your session take place?'),
+        SessionSheetIntro(_sessionLine(session)),
+        GSWButton(
+          label: 'Yes, it took place',
+          onPressed: () => Navigator.pop(context, _AttendanceAnswer.tookPlace),
+        ),
+        GSWButton(
+          label: 'No, it did not',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, _AttendanceAnswer.didNotTakePlace),
+        ),
+        GSWButton(
+          label: 'It was cut short',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, _AttendanceAnswer.cutShort),
+        ),
+        const SessionFootnote(
+          "This is what pays your trainer. If we don't hear from either of you within 24 hours of the end, we treat it as done. You can still tell us about a problem after that.",
+          color: GSWColors.textTertiary,
+        ),
+      ],
     );
   }
 }
@@ -427,69 +362,39 @@ class _ExperienceSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheduledAt = DateTime.tryParse(session['scheduled_at']?.toString() ?? '');
+    final trainer = SessionTrainerInfo.fromSession(session);
 
-    final trainer = session['trainers'];
-
-    final trainerName = trainer is Map
-        ? trainer['full_name']?.toString().trim() ?? 'Your trainer'
-        : 'Your trainer';
-
-    final local = scheduledAt == null ? null : _toDubai(scheduledAt);
-
-    final sessionLabel = local == null
-        ? trainerName
-        : '$trainerName, ${_longDate(local)}, ${_timeLabel(local)}';
-
-    return _SessionBottomSheetFrame(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'How did it go?',
-            style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            sessionLabel,
-            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
-          ),
-          const SizedBox(height: 28),
-          GSWButton(
-            label: 'It went well',
-            variant: GSWButtonVariant.primary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _ExperienceAnswer.wentWell),
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            label: 'It was fine',
-            variant: GSWButtonVariant.secondary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _ExperienceAnswer.fine),
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            label: 'Not what I hoped',
-            variant: GSWButtonVariant.secondary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, _ExperienceAnswer.notWhatIHoped),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Optional. This one is for you and for your trainer, and it does not hold up payment.',
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 1.5),
-          ),
-        ],
-      ),
+    return SessionSheetFrame(
+      children: [
+        const SessionSheetHeading('How did it go?'),
+        SessionSheetIntro(_sessionLine(session)),
+        GSWButton(
+          label: 'It went well',
+          onPressed: () => Navigator.pop(context, _ExperienceAnswer.wentWell),
+        ),
+        GSWButton(
+          label: 'It was fine',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, _ExperienceAnswer.fine),
+        ),
+        GSWButton(
+          label: 'Not what I hoped',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, _ExperienceAnswer.notWhatIHoped),
+        ),
+        SessionFootnote(
+          'Optional. This one is for you and for ${trainer.firstName}, and it does not hold up ${trainer.possessive} payment.',
+          color: GSWColors.textTertiary,
+        ),
+      ],
     );
   }
 }
 
 class _NotWhatIHopedSheet extends StatefulWidget {
-  const _NotWhatIHopedSheet();
+  const _NotWhatIHopedSheet({required this.session});
+
+  final Map<String, dynamic> session;
 
   @override
   State<_NotWhatIHopedSheet> createState() => _NotWhatIHopedSheetState();
@@ -508,120 +413,112 @@ class _NotWhatIHopedSheetState extends State<_NotWhatIHopedSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return _SessionBottomSheetFrame(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'Sorry it wasn’t what you hoped',
-            style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'Tell us what was off and we’ll help.',
-            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            decoration: BoxDecoration(
-              color: GSWColors.surfacePrimary,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              children: _options.entries.map((entry) {
-                final selected = _selected == entry.key;
+    final keys = _options.keys.toList();
 
-                return InkWell(
-                  onTap: () {
-                    setState(() {
-                      _selected = entry.key;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-                    decoration: BoxDecoration(
-                      border: entry.key == _options.keys.last
-                          ? null
-                          : Border(bottom: BorderSide(color: GSWColors.neutral700)),
-                    ),
+    return SessionSheetFrame(
+      children: [
+        const SessionSheetHeading("Sorry it wasn't what you hoped"),
+        const SessionSheetIntro("Tell us what was off and we'll help."),
+        // Figma "Reasons": 16px side padding, rows 15px top and bottom with a
+        // 12px gap, 1px inset dividers, Regular 15 / 22 (Medium when selected).
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: GSWColors.surfacePrimary,
+            borderRadius: BorderRadius.circular(GSWRadius.card),
+          ),
+          child: Column(
+            children: [
+              for (var index = 0; index < keys.length; index++) ...[
+                if (index > 0)
+                  const Divider(height: 1, thickness: 1, color: GSWColors.surfaceInteractive),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _selected = keys[index]),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 15),
                     child: Row(
                       children: [
                         Expanded(
                           child: Text(
-                            entry.value,
+                            _options[keys[index]]!,
                             style: GSWTextStyles.bodyLarge.copyWith(
+                              fontSize: 15,
                               color: GSWColors.textPrimary,
-                              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                              height: 22 / 15,
+                              fontWeight: _selected == keys[index] ? FontWeight.w500 : FontWeight.w400,
                             ),
                           ),
                         ),
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selected ? GSWColors.primary : GSWColors.textSecondary,
-                              width: selected ? 3 : 2,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: selected
-                              ? Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: const BoxDecoration(
-                                    color: GSWColors.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                )
-                              : null,
-                        ),
+                        const SizedBox(width: 12),
+                        _Radio(selected: _selected == keys[index]),
                       ],
                     ),
                   ),
-                );
-              }).toList(),
-            ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 24),
-          GSWButton(
-            label: 'Send',
-            variant: GSWButtonVariant.primary,
-            size: GSWButtonSize.large,
-            onPressed: () {
-              Navigator.pop(context, _NotHopedResult(category: _selected, reportProblem: false));
-            },
-          ),
-          const SizedBox(height: 16),
-          GSWButton(
-            label: 'Report a problem with this session',
-            variant: GSWButtonVariant.secondary,
-            size: GSWButtonSize.large,
-            onPressed: () {
-              Navigator.pop(context, _NotHopedResult(category: _selected, reportProblem: true));
-            },
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Not now',
-                style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
-              ),
-            ),
-          ),
-        ],
+        ),
+        GSWButton(
+          label: 'Send',
+          onPressed: () =>
+              Navigator.pop(context, _NotHopedResult(category: _selected, reportProblem: false)),
+        ),
+        GSWButton(
+          label: 'Report a problem with this session',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () =>
+              Navigator.pop(context, _NotHopedResult(category: _selected, reportProblem: true)),
+        ),
+        GSWButton(
+          label: 'Not now',
+          variant: GSWButtonVariant.tertiary,
+          onPressed: () => Navigator.pop(context),
+        ),
+        const SessionFootnote(
+          "If it was cut short or didn't go ahead as booked, report it and we'll look into it.",
+          color: GSWColors.textTertiary,
+        ),
+      ],
+    );
+  }
+}
+
+/// 11.2d radio: 22px, 2px ring in text/secondary, lime ring and dot when on.
+class _Radio extends StatelessWidget {
+  const _Radio({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected ? GSWColors.primary : GSWColors.textSecondary,
+          width: 2,
+        ),
       ),
+      child: selected
+          ? Container(
+              width: 10,
+              height: 10,
+              decoration: const BoxDecoration(color: GSWColors.primary, shape: BoxShape.circle),
+            )
+          : null,
     );
   }
 }
 
 class _SessionIssueReportPage extends StatefulWidget {
-  const _SessionIssueReportPage({this.initialCategory});
+  const _SessionIssueReportPage({required this.session, this.initialCategory});
 
+  final Map<String, dynamic> session;
   final String? initialCategory;
 
   @override
@@ -633,21 +530,38 @@ class _SessionIssueReportPageState extends State<_SessionIssueReportPage> {
 
   late String _selected;
 
-  static const _options = <String, String>{
-    'trainer_no_show': 'He did not turn up',
-    'trainer_late': 'He was very late',
-    'not_expected': 'The session was not what I expected',
-    'uncomfortable': 'I did not feel comfortable',
-    'something_else': 'Something else',
-  };
+  static const _keys = [
+    'trainer_no_show',
+    'trainer_late',
+    'not_expected',
+    'uncomfortable',
+    'something_else',
+  ];
+
+  late final SessionTrainerInfo _trainer = SessionTrainerInfo.fromSession(widget.session);
+
+  /// Labels use the trainer's first name, never an assumed pronoun.
+  String _label(String key) {
+    final name = _trainer.firstName;
+    switch (key) {
+      case 'trainer_no_show':
+        return '$name did not turn up';
+      case 'trainer_late':
+        return '$name was very late';
+      case 'not_expected':
+        return 'The session was not what I expected';
+      case 'uncomfortable':
+        return 'I did not feel comfortable';
+      default:
+        return 'Something else';
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-
-    _selected = _options.containsKey(widget.initialCategory)
-        ? widget.initialCategory!
-        : _options.keys.first;
+    _selected = _keys.contains(widget.initialCategory) ? widget.initialCategory! : _keys.first;
+    _detailsController.addListener(() => setState(() {}));
   }
 
   @override
@@ -658,6 +572,12 @@ class _SessionIssueReportPageState extends State<_SessionIssueReportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final amounts = SessionAmounts.fromSession(widget.session);
+    final name = _trainer.firstName;
+    final subject = _trainer.subject;
+
+    final totalText = amounts.total == null ? 'a full refund' : 'the full ${GSWMoney.aed(amounts.total)} back';
+
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
       body: SafeArea(
@@ -666,72 +586,105 @@ class _SessionIssueReportPageState extends State<_SessionIssueReportPage> {
             Expanded(
               child: SingleChildScrollView(
                 physics: const ClampingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _circleBackButton(context),
-                    const SizedBox(height: 28),
+                    SessionBackButton(onTap: () => Navigator.pop(context)),
+                    const SizedBox(height: 24),
                     Text(
                       'What happened?',
-                      style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+                      style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
                     ),
                     const SizedBox(height: 24),
-                    for (final entry in _options.entries) ...[
+                    for (var index = 0; index < _keys.length; index++) ...[
+                      if (index > 0) const SizedBox(height: 10),
                       _IssueOptionTile(
-                        label: entry.value,
-                        selected: _selected == entry.key,
-                        onTap: () {
-                          setState(() {
-                            _selected = entry.key;
-                          });
-                        },
+                        label: _label(_keys[index]),
+                        selected: _selected == _keys[index],
+                        onTap: () => setState(() => _selected = _keys[index]),
                       ),
-                      const SizedBox(height: 12),
                     ],
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 24),
+                    // Figma "Text Area Small": min 80 high, 16 x 12 padding,
+                    // border/secondary, radius 12, Regular 16.
                     TextField(
                       controller: _detailsController,
-                      minLines: 4,
+                      minLines: 3,
                       maxLines: 6,
                       maxLength: 250,
-                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+                      style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+                      buildCounter: (
+                        BuildContext context, {
+                        required int currentLength,
+                        required int? maxLength,
+                        required bool isFocused,
+                      }) =>
+                          null,
                       decoration: InputDecoration(
                         hintText: 'Tell us what happened...',
+                        hintStyle: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        constraints: const BoxConstraints(minHeight: 80),
                         filled: true,
                         fillColor: GSWColors.backgroundPrimary,
-                        helperText: 'A real person reads this.',
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(GSWRadius.control),
                           borderSide: const BorderSide(color: GSWColors.borderSecondary),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(GSWRadius.control),
                           borderSide: const BorderSide(color: GSWColors.primary),
                         ),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'A real person reads this.',
+                            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 16 / 12),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${_detailsController.text.length}/250',
+                          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 16 / 12),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: GSWButton(
-                label: 'Send report',
-                variant: GSWButtonVariant.primary,
-                size: GSWButtonSize.large,
-                onPressed: () {
-                  Navigator.pop(
-                    context,
-                    _IssueReportResult(
-                      category: _selected,
-                      note: _detailsController.text.trim().isEmpty
-                          ? null
-                          : _detailsController.text.trim(),
-                    ),
-                  );
-                },
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GSWButton(
+                    label: 'Send report',
+                    onPressed: () {
+                      final note = _detailsController.text.trim();
+                      Navigator.pop(
+                        context,
+                        _IssueReportResult(category: _selected, note: note.isEmpty ? null : note),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  // Policy v1.2: a trainer no-show gets a full refund, a reschedule, or a
+                  // priority rematch with GetSetWell covering up to AED 75 more.
+                  SessionFootnote(
+                    'We reply the same day if you write before 6:00 PM, and we check with $name, '
+                    "who has 12 hours to respond. If $subject didn't turn up, you choose: $totalText, "
+                    'a new time with ${_trainer.object}, or another trainer, with us covering up to '
+                    'AED 75 of any price difference.',
+                    color: GSWColors.textTertiary,
+                  ),
+                ],
               ),
             ),
           ],
@@ -750,100 +703,47 @@ class _IssueOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Figma 11.3 option: 52 high, 16px sides, 12px gap, an 18px ring (lime
+    // when selected, surface/interactive otherwise), Regular 15 / 20.
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(GSWRadius.control),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        constraints: const BoxConstraints(minHeight: 52),
+        padding: const EdgeInsets.symmetric(horizontal: 15),
         decoration: BoxDecoration(
           color: GSWColors.backgroundPrimary,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
+          borderRadius: BorderRadius.circular(GSWRadius.control),
+          border: Border.all(color: selected ? GSWColors.primary : GSWColors.surfaceInteractive),
         ),
-        child: Text(label, style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary)),
-      ),
-    );
-  }
-}
-
-class _RebookSheet extends StatelessWidget {
-  const _RebookSheet({required this.session, required this.title, required this.subtitle});
-
-  final Map<String, dynamic> session;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final trainer = session['trainers'];
-
-    final trainerName = trainer is Map
-        ? trainer['full_name']?.toString().trim() ?? 'Your trainer'
-        : 'Your trainer';
-
-    final firstName = trainerName.trim().split(RegExp(r'\s+')).first;
-
-    return _SessionBottomSheetFrame(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(title, style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary)),
-          const SizedBox(height: 18),
-          Text(subtitle, style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textSecondary)),
-          const SizedBox(height: 24),
-          GSWButton(
-            label: 'Book $firstName again',
-            variant: GSWButtonVariant.primary,
-            size: GSWButtonSize.large,
-            onPressed: () => Navigator.pop(context, true),
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(
-                'Not now',
-                style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionBottomSheetFrame extends StatelessWidget {
-  const _SessionBottomSheetFrame({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.fromLTRB(16, 12, 16, 28 + MediaQuery.of(context).viewInsets.bottom),
-        decoration: const BoxDecoration(
-          color: GSWColors.backgroundPrimary,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: [
             Container(
-              width: 52,
-              height: 5,
+              width: 18,
+              height: 18,
               decoration: BoxDecoration(
-                color: GSWColors.borderSecondary,
-                borderRadius: BorderRadius.circular(999),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? GSWColors.primary : GSWColors.surfaceInteractive,
+                  width: 1.5,
+                ),
               ),
             ),
-            const SizedBox(height: 26),
-            child,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                child: Text(
+                  label,
+                  style: GSWTextStyles.bodyLarge.copyWith(
+                    fontSize: 15,
+                    color: selected ? GSWColors.textPrimary : GSWColors.textSecondary,
+                    height: 20 / 15,
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -851,86 +751,145 @@ class _SessionBottomSheetFrame extends StatelessWidget {
   }
 }
 
-DateTime _toDubai(DateTime value) {
-  return value.toUtc().add(const Duration(hours: 4));
-}
+/// 11.2b "Glad it went well" and 11.2c "Thanks for telling us".
+///
+/// The design offers the same slot next week. Availability is confirmed on the
+/// next screen, so both choices open the booking flow with this trainer, where
+/// the person picks (or keeps) the time and pays on confirm.
+class _RebookSheet extends StatelessWidget {
+  const _RebookSheet({
+    required this.session,
+    required this.title,
+    required this.subtitle,
+    required this.primaryIsBookAgain,
+  });
 
-String _timeLabel(DateTime value) {
-  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  final Map<String, dynamic> session;
+  final String title;
+  final String subtitle;
 
-  final minute = value.minute.toString().padLeft(2, '0');
+  /// True for "went well" (lime primary), false for "fine" (both secondary).
+  final bool primaryIsBookAgain;
 
-  final period = value.hour >= 12 ? 'PM' : 'AM';
+  @override
+  Widget build(BuildContext context) {
+    final trainer = SessionTrainerInfo.fromSession(session);
+    final amounts = SessionAmounts.fromSession(session);
+    final start = sessionStartDubai(session);
+    final nextWeek = start?.add(const Duration(days: 7));
+    final location = session['location_label']?.toString().trim() ?? '';
 
-  return '$hour:$minute $period';
-}
-
-String _longDate(DateTime value) {
-  const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-  const months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December',
-  ];
-
-  return '${weekdays[value.weekday - 1]} '
-      '${value.day} '
-      '${months[value.month - 1]}';
-}
-
-String _trainerName(Map<String, dynamic> session) {
-  final trainer = session['trainers'];
-
-  if (trainer is Map) {
-    final name = trainer['full_name']?.toString().trim();
-
-    if (name != null && name.isNotEmpty) {
-      return name;
-    }
+    return SessionSheetFrame(
+      children: [
+        SessionSheetHeading(title),
+        SessionSheetIntro(subtitle),
+        if (nextWeek != null)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: GSWColors.surfacePrimary,
+              borderRadius: BorderRadius.circular(GSWRadius.card),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    SessionTrainerAvatar(name: trainer.name, imagePath: trainer.imagePath),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${trainer.name} · ${trainer.serviceLabel}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary, height: 20 / 14),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${GSWTime.dayLong(nextWeek)}, ${GSWTime.timeRange(nextWeek, kSessionLength)}',
+                  style: GSWTextStyles.labelLarge.copyWith(
+                    color: GSWColors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                    height: 22 / 16,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  [if (location.isNotEmpty) location, '60 min'].join(' · '),
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    fontSize: 13,
+                    height: 18 / 13,
+                    color: GSWColors.textSecondary,
+                  ),
+                ),
+                if (amounts.sessionRate != null) ...[
+                  const SizedBox(height: 10),
+                  const Divider(height: 1, thickness: 1, color: GSWColors.surfaceInteractive),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${GSWMoney.aed(amounts.sessionRate)} + ${GSWMoney.aed(GSWMoney.serviceFee(amounts.sessionRate!))} service fee',
+                          style: GSWTextStyles.bodyMedium.copyWith(
+                            fontSize: 13,
+                            height: 18 / 13,
+                            color: GSWColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        GSWMoney.aed(GSWMoney.totalWithFee(amounts.sessionRate!)),
+                        style: GSWTextStyles.labelLarge.copyWith(
+                          color: GSWColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                          height: 22 / 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        GSWButton(
+          label: 'Book the same time next week',
+          variant: primaryIsBookAgain ? GSWButtonVariant.primary : GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, true),
+        ),
+        GSWButton(
+          label: 'Pick another time',
+          variant: GSWButtonVariant.secondary,
+          onPressed: () => Navigator.pop(context, true),
+        ),
+        GSWButton(
+          label: 'Not now',
+          variant: GSWButtonVariant.tertiary,
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        const SessionFootnote(
+          'You pay when you confirm on the next screen.',
+          color: GSWColors.textTertiary,
+        ),
+      ],
+    );
   }
-
-  return 'your trainer';
 }
+
+String _trainerFirstName(Map<String, dynamic> session) =>
+    SessionTrainerInfo.fromSession(session).firstName;
 
 String _issueCategoryForFeedback(String category) {
   switch (category) {
     case 'timing_lateness':
       return 'trainer_late';
-
     case 'session_itself':
       return 'not_expected';
-
     default:
       return 'something_else';
   }
-}
-
-Widget _circleBackButton(BuildContext context) {
-  return Material(
-    color: Colors.transparent,
-    child: InkWell(
-      onTap: () => Navigator.pop(context),
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: GSWColors.borderSecondary),
-        ),
-        alignment: Alignment.center,
-        child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
-      ),
-    ),
-  );
 }

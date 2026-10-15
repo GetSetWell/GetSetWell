@@ -1,7 +1,8 @@
+import 'dart:convert';
+
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/features/booking/domain/models/booking_request_result.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
-import 'package:mobile/features/booking/domain/models/trainer_request_payload.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class BookingRequestService {
@@ -9,16 +10,28 @@ class BookingRequestService {
 
   final SupabaseClient _client;
 
-  Future<BookingRequestResult> submitTrainerRequest(TrainerRequestPayload payload) {
-    return _submit(payload.toJson());
-  }
-
   Future<BookingRequestResult> submitConciergeMatch(ConciergeMatchPayload payload) {
     return _submit(payload.toJson());
   }
 
   Future<BookingRequestResult> _submit(Map<String, dynamic> body) async {
-    final response = await _client.functions.invoke('create-booking-request', body: body);
+    final FunctionResponse response;
+
+    try {
+      response = await _client.functions.invoke('create-booking-request', body: body);
+    } on FunctionException catch (error) {
+      // The server answers 409 ACTIVE_CONCIERGE_EXISTS when a Help me choose
+      // request is already open. Surface it as a clear, typed error. Every
+      // other status is rethrown so callers keep their existing handling
+      // (for example the incomplete-profile 409 in the auth flow).
+      if (_errorCode(error.details) == 'ACTIVE_CONCIERGE_EXISTS') {
+        throw const BookingRequestException(
+          'You already have one open request. We will reply to that one first.',
+          code: 'ACTIVE_CONCIERGE_EXISTS',
+        );
+      }
+      rethrow;
+    }
 
     final data = response.data;
 
@@ -41,6 +54,19 @@ class BookingRequestService {
     }
 
     return BookingRequestResult.fromJson(json);
+  }
+
+  String? _errorCode(Object? details) {
+    Object? decoded = details;
+    if (details is String && details.trim().isNotEmpty) {
+      try {
+        decoded = jsonDecode(details);
+      } catch (_) {
+        return details.trim();
+      }
+    }
+    if (decoded is Map) return decoded['error']?.toString().trim();
+    return null;
   }
 
   String _messageFromResponse(Map<String, dynamic> json) {
@@ -92,9 +118,12 @@ class BookingRequestService {
 }
 
 class BookingRequestException implements Exception {
-  const BookingRequestException(this.message);
+  const BookingRequestException(this.message, {this.code});
 
   final String message;
+
+  /// Server error code when known, for example 'ACTIVE_CONCIERGE_EXISTS'.
+  final String? code;
 
   @override
   String toString() => message;

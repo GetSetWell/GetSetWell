@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 
 import '../../theme/gsw_colors.dart';
 import '../../theme/gsw_typography.dart';
@@ -354,7 +355,7 @@ class _GSWTextAreaState extends State<GSWTextArea> {
 
   OutlineInputBorder get _border {
     return OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(GSWRadius.control),
       borderSide: BorderSide(color: _borderColor, width: 1),
     );
   }

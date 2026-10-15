@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:mobile/core/widgets/sheets/gsw_sheet_drag_dismiss.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
+import '../../../../core/utils/gsw_format.dart';
 import '../../../../core/widgets/buttons/gsw_button.dart';
+import '../../data/repositories/trainer_repository.dart';
 import '../../domain/models/trainer.dart';
+import 'trainer_sheet_frame.dart';
 
 class TrainerFilters {
   const TrainerFilters({
@@ -14,8 +19,8 @@ class TrainerFilters {
     this.femaleOnly = false,
     this.languages = const <String>{},
     this.sessionModes = const <String>{},
-    this.minPrice = 150,
-    this.maxPrice = 400,
+    this.minPrice,
+    this.maxPrice,
     this.resolvedTrainerIds = const <String>{},
     this.restrictToResolvedTrainerIds = false,
   });
@@ -36,8 +41,12 @@ class TrainerFilters {
   final Set<String> languages;
   final Set<String> sessionModes;
 
-  final double minPrice;
-  final double maxPrice;
+  /// Price bounds chosen by the user. Both null means no price filter, so
+  /// trainers without a rate (or outside any default range) still show.
+  final double? minPrice;
+  final double? maxPrice;
+
+  bool get hasPriceFilter => minPrice != null || maxPrice != null;
 
   /// Specialty and session-mode information currently lives outside the
   /// Trainer object used by BrowseTrainersScreen.
@@ -55,8 +64,7 @@ class TrainerFilters {
         !femaleOnly &&
         languages.isEmpty &&
         sessionModes.isEmpty &&
-        minPrice <= 150 &&
-        maxPrice >= 400;
+        !hasPriceFilter;
   }
 
   TrainerFilters copyWith({
@@ -70,6 +78,7 @@ class TrainerFilters {
     Set<String>? sessionModes,
     double? minPrice,
     double? maxPrice,
+    bool clearPrice = false,
     Set<String>? resolvedTrainerIds,
     bool? restrictToResolvedTrainerIds,
   }) {
@@ -80,8 +89,8 @@ class TrainerFilters {
       femaleOnly: femaleOnly ?? this.femaleOnly,
       languages: languages ?? this.languages,
       sessionModes: sessionModes ?? this.sessionModes,
-      minPrice: minPrice ?? this.minPrice,
-      maxPrice: maxPrice ?? this.maxPrice,
+      minPrice: clearPrice ? null : minPrice ?? this.minPrice,
+      maxPrice: clearPrice ? null : maxPrice ?? this.maxPrice,
       resolvedTrainerIds: resolvedTrainerIds ?? this.resolvedTrainerIds,
       restrictToResolvedTrainerIds:
           restrictToResolvedTrainerIds ?? this.restrictToResolvedTrainerIds,
@@ -133,14 +142,20 @@ class TrainerFilters {
       }
     }
 
-    final price = trainer.pricePerSession?.toDouble();
+    if (hasPriceFilter) {
+      final price = trainer.pricePerSession?.toDouble();
 
-    if (price == null) {
-      return false;
-    }
+      if (price == null) {
+        return false;
+      }
 
-    if (price < minPrice || price > maxPrice) {
-      return false;
+      if (minPrice != null && price < minPrice!) {
+        return false;
+      }
+
+      if (maxPrice != null && price > maxPrice!) {
+        return false;
+      }
     }
 
     return true;
@@ -191,17 +206,21 @@ class TrainerFiltersBottomSheet extends StatefulWidget {
       isScrollControlled: true,
       useSafeArea: false,
 
-      // IMPORTANT:
-      // DraggableScrollableSheet below owns the vertical drag gesture.
-      // Leaving the modal route draggable as well creates two competing
-      // drag recognizers and causes the lag you were seeing.
+      // GSWSheetDragDismiss owns the vertical drag, so the sheet closes when
+      // dragged down anywhere (the list scrolls first, then the sheet moves).
       enableDrag: false,
 
       isDismissible: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.72),
+      barrierColor: TrainerSheetFrame.scrim,
       builder: (sheetContext) {
-        return TrainerFiltersBottomSheet(trainers: trainers, initialFilters: initialFilters);
+        return FractionallySizedBox(
+          heightFactor: TrainerSheetFrame.fullHeightFactor,
+          alignment: Alignment.bottomCenter,
+          child: GSWSheetDragDismiss(
+            child: TrainerFiltersBottomSheet(trainers: trainers, initialFilters: initialFilters),
+          ),
+        );
       },
     );
   }
@@ -233,11 +252,20 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
   // PRICE RANGE
   // ---------------------------------------------------------------------------
 
-  static const double absoluteMin = 150;
-  static const double absoluteMax = 400;
+  /// Slider bounds, derived from the live trainer rates
+  /// (TrainerRepository.getAvailablePrices), falling back to the rates of the
+  /// trainers passed in while that loads.
+  double? _priceFloor;
+  double? _priceCeiling;
 
+  /// Current slider values. Only applied as a filter once the user has
+  /// moved the slider ([_priceTouched]).
   double? _budgetMinValue;
   double? _budgetMaxValue;
+  bool _priceTouched = false;
+
+  bool get _hasPriceRange =>
+      _priceFloor != null && _priceCeiling != null && _priceCeiling! > _priceFloor!;
 
   // ---------------------------------------------------------------------------
   // SINGLE-SELECTION STATE
@@ -290,11 +318,56 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
 
     _selectedSessionMode = initial.sessionModes.isNotEmpty ? initial.sessionModes.first : null;
 
-    _budgetMinValue = initial.minPrice.clamp(absoluteMin, absoluteMax);
+    _setPriceBounds(
+      widget.trainers
+          .map((trainer) => trainer.pricePerSession)
+          .whereType<double>()
+          .toList(),
+    );
 
-    _budgetMaxValue = initial.maxPrice.clamp(absoluteMin, absoluteMax);
+    if (initial.hasPriceFilter) {
+      _priceTouched = true;
+      _budgetMinValue = initial.minPrice ?? _priceFloor;
+      _budgetMaxValue = initial.maxPrice ?? _priceCeiling;
+    }
 
     _loadRelationalFilterData();
+    _loadPriceBounds();
+  }
+
+  void _setPriceBounds(List<num> prices) {
+    if (prices.isEmpty) return;
+
+    final sorted = prices.map((price) => price.toDouble()).toList()..sort();
+
+    _priceFloor = sorted.first.floorToDouble();
+    _priceCeiling = sorted.last.ceilToDouble();
+
+    if (!_priceTouched) {
+      _budgetMinValue = _priceFloor;
+      _budgetMaxValue = _priceCeiling;
+    } else {
+      // Widen the range so a value chosen earlier is never clipped.
+      if (_budgetMinValue != null && _budgetMinValue! < _priceFloor!) {
+        _priceFloor = _budgetMinValue;
+      }
+
+      if (_budgetMaxValue != null && _budgetMaxValue! > _priceCeiling!) {
+        _priceCeiling = _budgetMaxValue;
+      }
+    }
+  }
+
+  Future<void> _loadPriceBounds() async {
+    try {
+      final prices = await TrainerRepository(_supabase).getAvailablePrices();
+
+      if (!mounted || prices.isEmpty) return;
+
+      setState(() => _setPriceBounds(prices));
+    } catch (error) {
+      debugPrint('Trainer price bounds load failed: $error');
+    }
   }
 
   Future<void> _loadRelationalFilterData() async {
@@ -417,8 +490,8 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
       femaleOnly: _femaleOnly,
       languages: _selectedLanguage == null ? const <String>{} : {_selectedLanguage!},
       sessionModes: _selectedSessionMode == null ? const <String>{} : {_selectedSessionMode!},
-      minPrice: _budgetMinValue ?? absoluteMin,
-      maxPrice: _budgetMaxValue ?? absoluteMax,
+      minPrice: _priceTouched ? _budgetMinValue : null,
+      maxPrice: _priceTouched ? _budgetMaxValue : null,
       resolvedTrainerIds: relationalIds,
       restrictToResolvedTrainerIds: _usesRelationalFilter,
     );
@@ -601,9 +674,9 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
 
       _selectedSessionMode = null;
 
-      _budgetMinValue = absoluteMin;
-
-      _budgetMaxValue = absoluteMax;
+      _priceTouched = false;
+      _budgetMinValue = _priceFloor;
+      _budgetMaxValue = _priceCeiling;
     });
   }
 
@@ -645,6 +718,12 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
   String get _recoveryMessage {
     final parts = <String>[];
 
+    final speciality = _selectedSpecialty ?? _selectedService;
+
+    if (speciality != null) {
+      parts.add(speciality);
+    }
+
     if (_selectedArea != null) {
       parts.add(_selectedArea!);
     }
@@ -657,328 +736,236 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
       parts.add(_selectedLanguage!);
     }
 
-    final minimum = (_budgetMinValue ?? absoluteMin).round();
+    if (_selectedSessionMode != null) {
+      parts.add(_selectedSessionMode!.toLowerCase());
+    }
 
-    final maximum = (_budgetMaxValue ?? absoluteMax).round();
-
-    if (minimum > absoluteMin || maximum < absoluteMax) {
-      parts.add('AED $minimum to $maximum');
+    if (_priceTouched && _budgetMinValue != null && _budgetMaxValue != null) {
+      parts.add(
+        '${GSWMoney.aed(_budgetMinValue!.round())} to ${GSWMoney.amount(_budgetMaxValue!.round())}',
+      );
     }
 
     if (parts.isEmpty) {
-      return 'These filters leave no trainers. Try removing one filter.';
+      return 'These filters leave nobody. Try removing one.';
     }
 
-    return '${parts.join(' plus ')} leaves nobody. '
-        'The area is the tight one; the other filters are fine on their own.';
+    if (parts.length == 1) {
+      return '${parts.first} leaves nobody right now. Try a different choice.';
+    }
+
+    final combined = '${parts.join(' plus ')} leaves nobody.';
+
+    if (_showAreaRecovery) {
+      return '$combined The area is the tight one; the other filters are fine on their own.';
+    }
+
+    return '$combined Try removing one.';
   }
 
   // ---------------------------------------------------------------------------
   // UI
+  // Figma 8.2 Filters / 8.3 No results: full-height sheet (790 of 844),
+  // 28px grabber zone, 16px sides, title row 30, 24px between groups,
+  // group label then 8px then 40px chips (8px gaps), sticky 92px bottom bar.
   // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    /*
-     * IMPORTANT
-     *
-     * Only DraggableScrollableSheet owns vertical dragging.
-     *
-     * showModalBottomSheet(enableDrag: false) prevents Flutter's modal
-     * BottomSheet gesture detector from competing with this one.
-     *
-     * The ListView MUST use the supplied scrollController. This gives
-     * DraggableScrollableSheet one continuous gesture:
-     *
-     *   content scrolls
-     *       ↓
-     *   reaches the top
-     *       ↓
-     *   continued downward drag shrinks the sheet
-     *       ↓
-     *   reaching min extent dismisses the modal
-     */
-    return DraggableScrollableSheet(
-      initialChildSize: 0.94,
-      minChildSize: 0.45,
-      maxChildSize: 0.94,
-      expand: false,
-      snap: false,
-      shouldCloseOnMinExtent: true,
-      builder: (context, scrollController) {
-        return Container(
+    return Container(
           decoration: const BoxDecoration(
             color: GSWColors.backgroundPrimary,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(GSWRadius.sheet)),
           ),
           clipBehavior: Clip.antiAlias,
-          child: SafeArea(
-            top: false,
-            child: Column(
-              children: [
-                _buildHandle(),
+          child: Column(
+            children: [
+              const TrainerSheetGrabber(),
 
-                Expanded(
-                  child: ScrollConfiguration(
-                    behavior: ScrollConfiguration.of(
-                      context,
-                    ).copyWith(overscroll: false, scrollbars: false),
-                    child: ListView(
-                      controller: scrollController,
+              Expanded(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(overscroll: false, scrollbars: false),
+                  child: ListView(
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      _buildHeader(),
 
-                      // No bouncing / stretching effect.
-                      physics: const ClampingScrollPhysics(),
+                      const SizedBox(height: 24),
 
-                      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                      _buildGroup(
+                        'Speciality',
+                        [
+                          _buildChip(
+                            label: 'Personal training',
+                            selected: _selectedService == 'Personal Training',
+                            onTap: () => _selectService('Personal Training'),
+                          ),
+                          _buildChip(
+                            label: 'Yoga',
+                            selected: _selectedService == 'Yoga and Pilates',
+                            onTap: () => _selectService('Yoga and Pilates'),
+                          ),
+                          _buildChip(
+                            label: 'Strength',
+                            selected: _selectedSpecialty == 'Strength',
+                            onTap: () => _selectSpecialty('Strength'),
+                          ),
+                          _buildChip(
+                            label: 'Pre and postnatal',
+                            selected: _selectedSpecialty == 'Pre and postnatal',
+                            onTap: () => _selectSpecialty('Pre and postnatal'),
+                          ),
+                          _buildChip(
+                            label: 'Mobility',
+                            selected: _selectedSpecialty == 'Mobility',
+                            onTap: () => _selectSpecialty('Mobility'),
+                          ),
+                        ],
+                      ),
 
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
-                      children: [
-                        _buildHeader(),
+                      const SizedBox(height: 24),
 
-                        const SizedBox(height: 28),
+                      _buildGroup('Area', [
+                        for (final area in _areas)
+                          _buildChip(
+                            label: area,
+                            selected: _selectedArea == area,
+                            onTap: () => _selectArea(area),
+                          ),
+                      ]),
 
-                        // ---------------------------------------------------
-                        // SPECIALITY
-                        // ---------------------------------------------------
-                        _buildSectionLabel('Speciality'),
+                      const SizedBox(height: 24),
 
-                        const SizedBox(height: 10),
-
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _buildChip(
-                              label: 'Personal training',
-                              selected: _selectedService == 'Personal Training',
-                              onTap: () => _selectService('Personal Training'),
-                            ),
-
-                            _buildChip(
-                              label: 'Yoga',
-                              selected: _selectedService == 'Yoga and Pilates',
-                              onTap: () => _selectService('Yoga and Pilates'),
-                            ),
-
-                            _buildChip(
-                              label: 'Strength',
-                              selected: _selectedSpecialty == 'Strength',
-                              onTap: () => _selectSpecialty('Strength'),
-                            ),
-
-                            _buildChip(
-                              label: 'Pre and postnatal',
-                              selected: _selectedSpecialty == 'Pre and postnatal',
-                              onTap: () => _selectSpecialty('Pre and postnatal'),
-                            ),
-
-                            _buildChip(
-                              label: 'Mobility',
-                              selected: _selectedSpecialty == 'Mobility',
-                              onTap: () => _selectSpecialty('Mobility'),
-                            ),
-                          ],
+                      _buildGroup('Trainer', [
+                        _buildChip(
+                          label: 'Female trainers only',
+                          selected: _femaleOnly,
+                          onTap: _selectFemaleOnly,
                         ),
+                        for (final language in _languages)
+                          _buildChip(
+                            label: language,
+                            selected: _selectedLanguage == language,
+                            onTap: () => _selectLanguage(language),
+                          ),
+                      ]),
 
-                        const SizedBox(height: 28),
+                      const SizedBox(height: 24),
 
-                        // ---------------------------------------------------
-                        // AREA
-                        // ---------------------------------------------------
-                        _buildSectionLabel('Area'),
+                      _buildGroup('Session', [
+                        for (final mode in _sessionModes)
+                          _buildChip(
+                            label: mode,
+                            selected: _selectedSessionMode == mode,
+                            onTap: () => _selectSessionMode(mode),
+                          ),
+                      ]),
 
-                        const SizedBox(height: 10),
+                      if (_hasPriceRange) ...[
+                        const SizedBox(height: 24),
 
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final area in _areas)
-                              _buildChip(
-                                label: area,
-                                selected: _selectedArea == area,
-                                onTap: () => _selectArea(area),
-                              ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 28),
-
-                        // ---------------------------------------------------
-                        // TRAINER
-                        // ---------------------------------------------------
-                        _buildSectionLabel('Trainer'),
-
-                        const SizedBox(height: 10),
-
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _buildChip(
-                              label: 'Female trainers only',
-                              selected: _femaleOnly,
-                              onTap: _selectFemaleOnly,
-                            ),
-
-                            for (final language in _languages)
-                              _buildChip(
-                                label: language,
-                                selected: _selectedLanguage == language,
-                                onTap: () => _selectLanguage(language),
-                              ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 28),
-
-                        // ---------------------------------------------------
-                        // SESSION
-                        // ---------------------------------------------------
-                        _buildSectionLabel('Session'),
-
-                        const SizedBox(height: 10),
-
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final mode in _sessionModes)
-                              _buildChip(
-                                label: mode,
-                                selected: _selectedSessionMode == mode,
-                                onTap: () => _selectSessionMode(mode),
-                              ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 28),
-
-                        // ---------------------------------------------------
-                        // PRICE
-                        // ---------------------------------------------------
                         _buildSectionLabel('Price per session'),
 
                         const SizedBox(height: 8),
 
                         Text(
-                          'AED ${(_budgetMinValue ?? absoluteMin).round()} '
-                          'to AED ${(_budgetMaxValue ?? absoluteMax).round()}',
-                          style: GSWTextStyles.titleExtraSmall.copyWith(
+                          '${GSWMoney.aed((_budgetMinValue ?? _priceFloor!).round())} '
+                          'to ${GSWMoney.aed((_budgetMaxValue ?? _priceCeiling!).round())}',
+                          style: GSWTextStyles.bodyLarge.copyWith(
                             color: GSWColors.textPrimary,
+                            height: 20 / 16,
                           ),
                         ),
 
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 8),
 
                         _buildPriceSlider(),
-
-                        if (_metadataLoadFailed) ...[
-                          const SizedBox(height: 14),
-
-                          Text(
-                            'Some filters could not be loaded. You can still use speciality type, area, trainer and price filters.',
-                            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-                          ),
-                        ],
-
-                        if (_showAreaRecovery) ...[
-                          const SizedBox(height: 18),
-
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: GSWColors.surfaceInteractive,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              _recoveryMessage,
-                              style: GSWTextStyles.bodyMedium.copyWith(
-                                color: GSWColors.textPrimary,
-                                height: 1.45,
-                              ),
-                            ),
-                          ),
-                        ],
-
-                        // Extra spacing so the last content never
-                        // sits behind the sticky action.
-                        const SizedBox(height: 8),
                       ],
-                    ),
+
+                      if (_metadataLoadFailed) ...[
+                        const SizedBox(height: 16),
+
+                        Text(
+                          'Some filters could not be loaded. You can still filter by speciality, area, trainer and price.',
+                          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
+              ),
 
-                _buildBottomAction(),
-              ],
-            ),
+              if (_showNoResultsExplainer) _buildNoResultsExplainer(),
+
+              _buildBottomAction(),
+            ],
           ),
         );
-      },
-    );
   }
 
-  Widget _buildHandle() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+  bool get _noMatches {
+    final checking = _metadataLoading && _usesRelationalFilter;
 
-      /*
-       * The actual drag gesture is handled by
-       * DraggableScrollableSheet.
-       *
-       * This larger hit region simply makes the top
-       * of the sheet comfortable to grab.
-       */
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(0, 14, 0, 10),
-        child: Center(
-          child: Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: GSWColors.borderSecondary,
-              borderRadius: BorderRadius.circular(999),
+    return !checking && _matches.isEmpty;
+  }
+
+  bool get _showNoResultsExplainer => _noMatches && !_currentFilters.isEmpty;
+
+  Widget _buildHeader() {
+    return SizedBox(
+      height: 30,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              _noMatches ? 'No trainers match' : 'Filters',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: trainerSheetHeadingStyle(),
             ),
           ),
-        ),
+
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _clearAll,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Text(
+                'Clear all',
+                style: GSWTextStyles.labelMedium.copyWith(
+                  color: GSWColors.textAccent,
+                  height: 20 / 14,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildHeader() {
-    final checking = _metadataLoading && _usesRelationalFilter;
-
-    final noMatches = !checking && _matches.isEmpty;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+  Widget _buildGroup(String label, List<Widget> chips) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Text(
-            noMatches ? 'No trainers match' : 'Filters',
-            style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
-          ),
-        ),
+        _buildSectionLabel(label),
 
-        TextButton(
-          onPressed: _clearAll,
-          style: TextButton.styleFrom(
-            foregroundColor: GSWColors.primary,
-            padding: EdgeInsets.zero,
-            minimumSize: const Size(0, 40),
-          ),
-          child: Text(
-            'Clear all',
-            style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.primary),
-          ),
-        ),
+        const SizedBox(height: 8),
+
+        Wrap(spacing: 8, runSpacing: 8, children: chips),
       ],
     );
   }
 
   Widget _buildSectionLabel(String text) {
-    return Text(text, style: GSWTextStyles.labelLarge.copyWith(color: GSWColors.textSecondary));
+    return Text(
+      text,
+      style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
+    );
   }
 
   Widget _buildChip({required String label, required bool selected, required VoidCallback onTap}) {
@@ -986,22 +973,29 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
-          constraints: const BoxConstraints(minHeight: 42),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          // Figma 8.2: unselected chips have no fill, a Border/Disabled ring
+          // and Text/Secondary labels; selected chips are solid lime.
           decoration: BoxDecoration(
-            color: selected ? GSWColors.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
+            color: selected ? GSWColors.primary : null,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
+            border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderDisabled),
           ),
-          child: Text(
-            label,
-            style: GSWTextStyles.labelLarge.copyWith(
-              color: selected ? GSWColors.backgroundPrimary : GSWColors.textSecondary,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+          // widthFactor 1 keeps the chip hugging its label inside the Wrap
+          // (an aligned Container would stretch to the full row).
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: GSWTextStyles.labelMedium.copyWith(
+                color: selected ? GSWColors.textInverse : GSWColors.textSecondary,
+                height: 1,
+              ),
             ),
           ),
         ),
@@ -1009,55 +1003,63 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // EXACT CONTINUOUS RANGE SLIDER
-  // ---------------------------------------------------------------------------
-
   Widget _buildPriceSlider() {
+    final floor = _priceFloor!;
+    final ceiling = _priceCeiling!;
+
     return SizedBox(
-      height: 32,
+      height: 24,
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
           trackHeight: 4,
-
           activeTrackColor: GSWColors.primary,
-
-          inactiveTrackColor: const Color(0xFF2E3944),
-
+          inactiveTrackColor: GSWColors.surfaceInteractive,
           thumbColor: GSWColors.primary,
-
           overlayColor: GSWColors.primary.withValues(alpha: 0.10),
-
           rangeThumbShape: const RoundRangeSliderThumbShape(
             enabledThumbRadius: 12,
             elevation: 0,
             pressedElevation: 0,
           ),
-
           rangeTrackShape: const EdgeToEdgeRangeSliderTrackShape(),
-
           overlayShape: const RoundSliderOverlayShape(overlayRadius: 20),
-
           showValueIndicator: ShowValueIndicator.never,
         ),
         child: RangeSlider(
-          min: absoluteMin,
-          max: absoluteMax,
-
-          // No divisions.
-          // Continuous and smooth.
+          min: floor,
+          max: ceiling,
           values: RangeValues(
-            (_budgetMinValue ?? absoluteMin).clamp(absoluteMin, absoluteMax),
-            (_budgetMaxValue ?? absoluteMax).clamp(absoluteMin, absoluteMax),
+            (_budgetMinValue ?? floor).clamp(floor, ceiling),
+            (_budgetMaxValue ?? ceiling).clamp(floor, ceiling),
           ),
-
           onChanged: (RangeValues values) {
             setState(() {
+              _priceTouched = true;
               _budgetMinValue = values.start;
-
               _budgetMaxValue = values.end;
             });
           },
+        ),
+      ),
+    );
+  }
+
+  /// 8.3: explains which filter combination leaves nobody. Figma: full
+  /// sheet width, #2E3944 fill, 12px radius, 14/12 padding, Regular 13/19.
+  Widget _buildNoResultsExplainer() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: GSWColors.surfaceInteractive,
+        borderRadius: BorderRadius.circular(GSWRadius.control),
+      ),
+      child: Text(
+        _recoveryMessage,
+        style: GSWTextStyles.bodyMedium.copyWith(
+          color: GSWColors.textPrimary,
+          fontSize: 13,
+          height: 19 / 13,
         ),
       ),
     );
@@ -1067,10 +1069,7 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
     final waitingForMetadata = _metadataLoading && _usesRelationalFilter;
 
     if (waitingForMetadata) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        color: GSWColors.backgroundPrimary,
+      return const TrainerSheetBottomBar(
         child: GSWButton(
           label: 'Checking trainers',
           onPressed: null,
@@ -1083,23 +1082,35 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
 
     final count = _matches.length;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      decoration: const BoxDecoration(color: GSWColors.backgroundPrimary),
-      child: _showAreaRecovery
-          ? GSWButton(
-              label: _recoveryButtonLabel,
-              onPressed: _dropAreaAndApply,
-              variant: GSWButtonVariant.primary,
-              size: GSWButtonSize.large,
-            )
-          : GSWButton(
-              label: _buttonLabel,
-              onPressed: count > 0 ? _apply : null,
-              variant: count > 0 ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
-              size: GSWButtonSize.large,
-            ),
+    if (_showAreaRecovery) {
+      return TrainerSheetBottomBar(
+        child: GSWButton(
+          label: _recoveryButtonLabel,
+          onPressed: _dropAreaAndApply,
+          variant: GSWButtonVariant.primary,
+          size: GSWButtonSize.large,
+        ),
+      );
+    }
+
+    if (count == 0) {
+      return TrainerSheetBottomBar(
+        child: GSWButton(
+          label: 'Clear all filters',
+          onPressed: _clearAll,
+          variant: GSWButtonVariant.primary,
+          size: GSWButtonSize.large,
+        ),
+      );
+    }
+
+    return TrainerSheetBottomBar(
+      child: GSWButton(
+        label: _buttonLabel,
+        onPressed: _apply,
+        variant: GSWButtonVariant.primary,
+        size: GSWButtonSize.large,
+      ),
     );
   }
 
@@ -1119,7 +1130,7 @@ class _TrainerFiltersBottomSheetState extends State<TrainerFiltersBottomSheet> {
           elevation: 0,
           margin: const EdgeInsets.all(16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.control),
             side: const BorderSide(color: GSWColors.borderSecondary),
           ),
         ),

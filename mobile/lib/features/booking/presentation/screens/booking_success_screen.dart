@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
@@ -24,22 +25,26 @@ class BookingSuccessScreen extends StatelessWidget {
         statusBarColor: Colors.transparent,
         systemNavigationBarColor: GSWColors.backgroundPrimary,
       ),
-      child: Scaffold(
-        backgroundColor: GSWColors.backgroundPrimary,
-        body: SafeArea(
-          child: ScrollConfiguration(
-            behavior: const _NoScrollEffectBehavior(),
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              child: switch (data) {
-                ConciergeMatchSuccessData conciergeData =>
-                  _buildConciergeSuccess(context, conciergeData),
-                TrainerRequestSuccessData trainerData => _buildTrainerSuccess(
-                  context,
-                  trainerData,
-                ),
-              },
+      // Reached with go(), so the stack is empty: Android back goes Home
+      // instead of closing the app.
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _goToHome(context);
+        },
+        child: Scaffold(
+          backgroundColor: GSWColors.backgroundPrimary,
+          body: SafeArea(
+            child: ScrollConfiguration(
+              behavior: const _NoScrollEffectBehavior(),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                child: switch (data) {
+                  ConciergeMatchSuccessData conciergeData =>
+                    _buildConciergeSuccess(context, conciergeData),
+                },
+              ),
             ),
           ),
         ),
@@ -64,12 +69,13 @@ class BookingSuccessScreen extends StatelessWidget {
 
         _buildConciergeRequestCard(successData),
 
-        const SizedBox(height: 22),
+        const SizedBox(height: 24),
 
         Text(
           'What happens next',
           style: GSWTextStyles.titleExtraSmall.copyWith(
             color: GSWColors.textPrimary,
+            height: 1,
           ),
         ),
 
@@ -81,7 +87,7 @@ class BookingSuccessScreen extends StatelessWidget {
 
         _buildTalkNowCard(),
 
-        const SizedBox(height: 48),
+        const SizedBox(height: 24),
 
         _buildContactCopy(successData.referenceCode),
 
@@ -119,7 +125,7 @@ class BookingSuccessScreen extends StatelessWidget {
           ),
         ),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
 
         Text.rich(
           TextSpan(
@@ -128,12 +134,14 @@ class BookingSuccessScreen extends StatelessWidget {
                 text: 'REQUEST ',
                 style: GSWTextStyles.displayLarge.copyWith(
                   color: GSWColors.textPrimary,
+                  height: 1,
                 ),
               ),
               TextSpan(
                 text: 'SENT',
                 style: GSWTextStyles.displayLarge.copyWith(
                   color: GSWColors.textAccent,
+                  height: 1,
                 ),
               ),
             ],
@@ -141,16 +149,14 @@ class BookingSuccessScreen extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
 
-        const SizedBox(height: 8),
+        const SizedBox(height: 16),
 
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            'Nothing is booked. A person will read this and you’ll be notified via app & WhatsApp.',
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.bodyMedium.copyWith(
-              color: GSWColors.textSecondary,
-            ),
+        Text(
+          'Nothing is booked. A person will read this and you’ll be notified via app & WhatsApp.',
+          textAlign: TextAlign.center,
+          style: GSWTextStyles.bodyMedium.copyWith(
+            color: GSWColors.textSecondary,
+            height: 20 / 14,
           ),
         ),
       ],
@@ -162,7 +168,7 @@ class BookingSuccessScreen extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         children: [
@@ -173,6 +179,7 @@ class BookingSuccessScreen extends StatelessWidget {
                   'Your request',
                   style: GSWTextStyles.titleExtraSmall.copyWith(
                     color: GSWColors.textSecondary,
+                    height: 1,
                   ),
                 ),
               ),
@@ -180,6 +187,7 @@ class BookingSuccessScreen extends StatelessWidget {
                 data.referenceCode,
                 style: GSWTextStyles.titleExtraSmall.copyWith(
                   color: GSWColors.textAccent,
+                  height: 1,
                 ),
               ),
             ],
@@ -212,7 +220,7 @@ class BookingSuccessScreen extends StatelessWidget {
           _SummaryRow(
             leftLabel: 'Preferred Area',
             leftValue: data.preferredArea,
-            rightLabel: 'Trainer preference',
+            rightLabel: 'Trainer & Fee',
             rightValue: _trainerPreferenceSummary(data),
             highlightRight: _hasTrainerPreference(data),
           ),
@@ -225,217 +233,32 @@ class BookingSuccessScreen extends StatelessWidget {
     return data.trainerPreference != null || data.budget != null;
   }
 
+  /// "AED 200 to 300". Older callers pass "AED 200–300"; never show a dash.
+  String? _budgetText(String? budget) {
+    final value = budget?.trim();
+    if (value == null || value.isEmpty) return null;
+
+    return value.replaceAll(RegExp(r'\s*[–—-]\s*'), ' to ');
+  }
+
   String _trainerPreferenceSummary(ConciergeMatchSuccessData data) {
     final parts = <String>[];
 
     final trainerPreference = data.trainerPreference?.trim();
 
-    final budget = data.budget?.trim();
+    final budget = _budgetText(data.budget);
 
-    if (trainerPreference != null && trainerPreference.isNotEmpty) {
-      parts.add(trainerPreference);
-    }
+    parts.add(
+      trainerPreference != null && trainerPreference.isNotEmpty
+          ? trainerPreference
+          : 'No preference',
+    );
 
     if (budget != null && budget.isNotEmpty) {
       parts.add(budget);
     }
 
-    if (parts.isEmpty) {
-      return 'No preference';
-    }
-
     return parts.join(', ');
-  }
-
-  // ---------------------------------------------------------------------------
-  // Specific trainer success
-  // ---------------------------------------------------------------------------
-
-  Widget _buildTrainerSuccess(
-    BuildContext context,
-    TrainerRequestSuccessData successData,
-  ) {
-    final firstName = _firstName(successData.trainerName);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildTrainerSuccessHeader(firstName),
-
-        const SizedBox(height: 24),
-
-        _buildTrainerRequestCard(successData),
-
-        const SizedBox(height: 22),
-
-        Text(
-          'What happens next',
-          style: GSWTextStyles.titleExtraSmall.copyWith(
-            color: GSWColors.textPrimary,
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
-        _TrainerNextStepsCard(trainerFirstName: firstName),
-
-        const SizedBox(height: 24),
-
-        _buildTalkNowCard(),
-
-        const SizedBox(height: 24),
-
-        _buildContactCopy(successData.referenceCode),
-
-        const SizedBox(height: 24),
-
-        GSWButton(
-          size: GSWButtonSize.large,
-          variant: GSWButtonVariant.secondary,
-          label: 'Back to home',
-          onPressed: () => _goToHome(context),
-        ),
-
-        const SizedBox(height: 8),
-
-        GSWButton(
-          size: GSWButtonSize.large,
-          label: 'Open WhatsApp',
-          leadingIcon: GSWIcons.whatsapp,
-          onPressed: () => _openWhatsApp(context, successData.referenceCode),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTrainerSuccessHeader(String firstName) {
-    return Column(
-      children: [
-        SvgPicture.asset(
-          GSWIcons.chatCheck,
-          width: 96,
-          height: 96,
-          colorFilter: const ColorFilter.mode(
-            GSWColors.iconAccent,
-            BlendMode.srcIn,
-          ),
-        ),
-
-        const SizedBox(height: 24),
-
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'REQUEST ',
-                style: GSWTextStyles.displayLarge.copyWith(
-                  color: GSWColors.textPrimary,
-                ),
-              ),
-              TextSpan(
-                text: 'SENT',
-                style: GSWTextStyles.displayLarge.copyWith(
-                  color: GSWColors.textAccent,
-                ),
-              ),
-            ],
-          ),
-          textAlign: TextAlign.center,
-        ),
-
-        const SizedBox(height: 8),
-
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            'This is not a confirmed booking. We will check '
-            '$firstName’s availability and get back to you on WhatsApp.',
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.bodyMedium.copyWith(
-              color: GSWColors.textSecondary,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTrainerRequestCard(TrainerRequestSuccessData data) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Your request',
-                  style: GSWTextStyles.titleExtraSmall.copyWith(
-                    color: GSWColors.textSecondary,
-                  ),
-                ),
-              ),
-              Text(
-                data.referenceCode,
-                style: GSWTextStyles.titleExtraSmall.copyWith(
-                  color: GSWColors.textAccent,
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
-
-          Container(height: 1, color: GSWColors.borderDisabled),
-
-          const SizedBox(height: 12),
-
-          Text(
-            data.trainerName,
-            style: GSWTextStyles.titleExtraSmall.copyWith(
-              color: GSWColors.textPrimary,
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          Container(height: 1, color: GSWColors.borderDisabled),
-
-          const SizedBox(height: 12),
-
-          _SummaryRow(
-            leftLabel: 'Goal',
-            leftValue: data.goal,
-            rightLabel: 'Days',
-            rightValue: data.days,
-          ),
-
-          const SizedBox(height: 12),
-
-          _SummaryRow(
-            leftLabel: 'Time',
-            leftValue: data.time,
-            rightLabel: 'Where',
-            rightValue: data.trainingLocation,
-          ),
-
-          const SizedBox(height: 12),
-
-          _SummaryRow(
-            leftLabel: 'Preferred Area',
-            leftValue: data.preferredArea,
-            rightLabel: 'Rate',
-            rightValue: data.rate,
-            highlightRight: true,
-          ),
-        ],
-      ),
-    );
   }
 
   // ---------------------------------------------------------------------------
@@ -444,10 +267,12 @@ class BookingSuccessScreen extends StatelessWidget {
 
   Widget _buildTalkNowCard() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(15, 13, 15, 14),
+      width: double.infinity,
+      // Figma 16px padding; Flutter adds the 1px border on top.
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: GSWColors.surfaceElevated,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         border: Border.all(color: GSWColors.borderDisabled),
       ),
       child: Column(
@@ -455,8 +280,11 @@ class BookingSuccessScreen extends StatelessWidget {
         children: [
           Text(
             'Prefer to talk now?',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: GSWTextStyles.titleExtraSmall.copyWith(
               color: GSWColors.textPrimary,
+              height: 1,
             ),
           ),
 
@@ -467,6 +295,7 @@ class BookingSuccessScreen extends StatelessWidget {
             'message. You do not need to explain it again.',
             style: GSWTextStyles.bodySmall.copyWith(
               color: GSWColors.textSecondary,
+              height: 16 / 12,
             ),
           ),
         ],
@@ -479,9 +308,10 @@ class BookingSuccessScreen extends StatelessWidget {
       TextSpan(
         children: [
           TextSpan(
-            text: 'Any questions? Email ',
+            text: 'If you have any queries, reach us on ',
             style: GSWTextStyles.bodyMedium.copyWith(
               color: GSWColors.textSecondary,
+              height: 20 / 14,
             ),
           ),
           TextSpan(
@@ -491,9 +321,10 @@ class BookingSuccessScreen extends StatelessWidget {
             ),
           ),
           TextSpan(
-            text: ' and quote $referenceCode.',
+            text: ' quoting $referenceCode.',
             style: GSWTextStyles.bodyMedium.copyWith(
               color: GSWColors.textSecondary,
+              height: 20 / 14,
             ),
           ),
         ],
@@ -516,7 +347,13 @@ class BookingSuccessScreen extends StatelessWidget {
 
     final uri = Uri.https('wa.me', '/$_whatsAppNumber', {'text': message});
 
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    bool launched;
+    try {
+      launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (error) {
+      debugPrint('Open WhatsApp failed: $error');
+      launched = false;
+    }
 
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -525,16 +362,6 @@ class BookingSuccessScreen extends StatelessWidget {
         ),
       );
     }
-  }
-
-  String _firstName(String fullName) {
-    final trimmed = fullName.trim();
-
-    if (trimmed.isEmpty) {
-      return 'the trainer';
-    }
-
-    return trimmed.split(RegExp(r'\s+')).first;
   }
 }
 
@@ -624,6 +451,7 @@ class _SummaryItem extends StatelessWidget {
           softWrap: true,
           style: GSWTextStyles.bodyMedium.copyWith(
             color: GSWColors.textSecondary,
+            height: 20 / 14,
           ),
         ),
 
@@ -636,6 +464,7 @@ class _SummaryItem extends StatelessWidget {
           softWrap: true,
           style: GSWTextStyles.bodyMedium.copyWith(
             color: highlight ? GSWColors.textAccent : GSWColors.textPrimary,
+            height: 20 / 14,
           ),
         ),
       ],
@@ -656,7 +485,7 @@ class _ConciergeNextStepsCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: const Column(
         children: [
@@ -674,7 +503,8 @@ class _ConciergeNextStepsCard extends StatelessWidget {
             number: '2',
             title: 'We suggest who fits',
             description:
-                'One trainer who fits best, with the session fee and why we picked them.',
+                'One most suitable trainer, with session fee, and why we picked them. '
+                'Not a list of forty.',
           ),
 
           SizedBox(height: 8),
@@ -683,59 +513,7 @@ class _ConciergeNextStepsCard extends StatelessWidget {
             number: '3',
             title: 'You decide',
             description:
-                'Go ahead, ask for another option, or leave it. No obligation and no follow up calls.',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Trainer next steps
-// -----------------------------------------------------------------------------
-
-class _TrainerNextStepsCard extends StatelessWidget {
-  const _TrainerNextStepsCard({required this.trainerFirstName});
-
-  final String trainerFirstName;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          const _NextStep(
-            number: '1',
-            title: 'We review your request',
-            description:
-                'Not a queue and not an auto reply. Usually the same day, '
-                'and by the next morning at the latest.',
-          ),
-
-          const SizedBox(height: 8),
-
-          _NextStep(
-            number: '2',
-            title: 'We message you on WhatsApp',
-            description:
-                'We confirm whether $trainerFirstName is free, agree the '
-                'time and place, and answer anything you want to ask first.',
-          ),
-
-          const SizedBox(height: 8),
-
-          _NextStep(
-            number: '3',
-            title: 'You decide',
-            description:
-                'Nothing is booked until you say so. You pay '
-                '$trainerFirstName directly, after the session is agreed.',
+                'Take one, ask for others, or leave it. No obligation and no follow up calls.',
           ),
         ],
       ),
@@ -775,6 +553,7 @@ class _NextStep extends StatelessWidget {
             number,
             style: GSWTextStyles.labelMedium.copyWith(
               color: GSWColors.textAccent,
+              height: 1,
             ),
           ),
         ),
@@ -789,6 +568,7 @@ class _NextStep extends StatelessWidget {
                 title,
                 style: GSWTextStyles.bodyMedium.copyWith(
                   color: GSWColors.textPrimary,
+                  height: 20 / 14,
                 ),
               ),
 
@@ -798,6 +578,7 @@ class _NextStep extends StatelessWidget {
                 description,
                 style: GSWTextStyles.bodyMedium.copyWith(
                   color: GSWColors.textSecondary,
+                  height: 20 / 14,
                 ),
               ),
             ],

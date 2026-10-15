@@ -1,15 +1,21 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:mobile/core/widgets/sheets/gsw_sheet_drag_dismiss.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/services/push_notification_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/core/widgets/navigation/gsw_bottom_nav.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// 12.1 Profile (Figma 819:3468).
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key});
 
@@ -43,7 +49,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   void initState() {
     super.initState();
-
     _profileFuture = _loadProfile();
   }
 
@@ -54,7 +59,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     if (user == null) {
       throw StateError('AUTH_REQUIRED');
     }
+
     final customerId = await CustomerIdentityService(client: client).getCustomerId();
+
     final profile = await client
         .from('customer_profiles')
         .select('full_name, phone, city, email, profile_photo_path')
@@ -62,42 +69,52 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         .maybeSingle();
 
     final fullName = profile?['full_name']?.toString().trim() ?? '';
-
     final city = profile?['city']?.toString().trim() ?? '';
-
     final authPhone = user.phoneNumber?.trim() ?? '';
-
     final profilePhone = profile?['phone']?.toString().trim() ?? '';
-
     final phone = authPhone.isNotEmpty ? authPhone : profilePhone;
-
-    final email = profile?['email']?.toString().trim() ?? user.email?.trim() ?? '';
-
+    final email = profile?['email']?.toString().trim() ?? '';
     final photoPath = profile?['profile_photo_path']?.toString().trim();
 
     String? profilePhotoUrl;
 
     if (photoPath != null && photoPath.isNotEmpty) {
-      profilePhotoUrl = await client.storage
-          .from('profile-photos')
-          .createSignedUrl(photoPath, 60 * 60);
+      // A missing or unreadable photo should not break the whole screen.
+      try {
+        profilePhotoUrl = await client.storage
+            .from('profile-photos')
+            .createSignedUrl(photoPath, 60 * 60);
+      } catch (error) {
+        debugPrint('Profile photo URL failed: $error');
+      }
     }
 
     final sessionRows = await client.from('sessions').select('id').eq('user_id', customerId);
 
-    final sessionCount = sessionRows.length;
-
-    final memberSince = user.metadata.creationTime ?? DateTime.now();
+    final created = user.metadata.creationTime;
+    final memberSince = created != null ? GSWTime.toDubai(created) : GSWTime.nowDubai();
 
     return _UserProfileData(
       fullName: fullName,
       phone: phone,
       city: city,
       email: email,
-      sessionCount: sessionCount,
+      sessionCount: sessionRows.length,
       memberSince: memberSince,
       profilePhotoUrl: profilePhotoUrl,
     );
+  }
+
+  void _reload() {
+    setState(() {
+      _profileFuture = _loadProfile();
+    });
+  }
+
+  Future<void> _openEditDetails() async {
+    await context.push(GSWRoutes.editProfile);
+    if (!mounted) return;
+    _reload();
   }
 
   @override
@@ -105,22 +122,25 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
       body: SafeArea(
+        bottom: false,
         child: ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
           child: SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'PROFILE',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.displaySmall?.copyWith(color: GSWColors.textPrimary),
+                  style: GSWTextStyles.displaySmall.copyWith(
+                    fontSize: 40,
+                    height: 44 / 40,
+                    color: GSWColors.textPrimary,
+                  ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
 
                 FutureBuilder<_UserProfileData>(
                   future: _profileFuture,
@@ -134,13 +154,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       );
                     }
 
-                    if (snapshot.hasError) {
+                    if (snapshot.hasError || !snapshot.hasData) {
                       debugPrint('Profile load failed: ${snapshot.error}');
-
-                      return Text(
-                        'We could not load your profile.',
-                        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-                      );
+                      return _buildLoadError();
                     }
 
                     final profile = snapshot.data!;
@@ -148,48 +164,40 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildProfileCard(context, profile),
+                        _buildIdentityCard(profile),
 
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 28),
 
-                        _buildSectionTitle(context, 'Personal details'),
-
-                        const SizedBox(height: 12),
-
-                        _buildSettingsCard(
+                        _buildSection(
+                          title: 'Personal details',
                           children: [
-                            _buildRow(
-                              context,
-                              icon: Icons.person_outline,
+                            _buildDetailRow(
+                              icon: Icons.person_outline_rounded,
                               label: 'Name',
                               value: profile.fullName,
                             ),
-
                             _divider(),
-
-                            _buildRow(
-                              context,
+                            _buildDetailRow(
                               icon: Icons.phone_outlined,
-                              label: 'Phone',
-                              value: profile.phone,
+                              label: 'Mobile',
+                              value: _formatPhone(profile.phone),
                             ),
-
                             _divider(),
-
-                            _buildRow(
-                              context,
+                            _buildDetailRow(
                               icon: Icons.location_on_outlined,
                               label: 'City',
-                              value: profile.city,
+                              value: profile.city.isEmpty ? 'Dubai' : profile.city,
+                              valueColor: GSWColors.textTertiary,
                             ),
-
                             _divider(),
-
-                            _buildRow(
-                              context,
-                              icon: Icons.email_outlined,
+                            _buildDetailRow(
+                              icon: Icons.mail_outline_rounded,
                               label: 'Email',
-                              value: profile.email,
+                              value: profile.email.isEmpty ? 'Add email' : profile.email,
+                              valueColor: profile.email.isEmpty
+                                  ? GSWColors.textAccent
+                                  : GSWColors.textSecondary,
+                              onTap: _openEditDetails,
                             ),
                           ],
                         ),
@@ -198,98 +206,85 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   },
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
 
-                _buildSectionTitle(context, 'Account settings'),
-
-                const SizedBox(height: 12),
-
-                _buildSettingsCard(
+                _buildSection(
+                  title: 'Account settings',
                   children: [
-                    _buildActionRow(
-                      context,
-                      icon: Icons.notifications_outlined,
+                    _buildNavRow(
+                      icon: Icons.notifications_none_rounded,
                       label: 'Notifications',
-                      onTap: () {
-                        context.push(GSWRoutes.notificationSettings);
-                      },
+                      onTap: () => context.push(GSWRoutes.notificationSettings),
                     ),
-
                     _divider(),
-
-                    _buildActionRow(
-                      context,
-                      icon: Icons.language_outlined,
+                    _buildNavRow(
+                      icon: Icons.language_rounded,
                       label: 'Language',
-                      onTap: () {
-                        context.push(GSWRoutes.languageSettings);
-                      },
+                      trailingValue: 'English',
+                      onTap: () => context.push(GSWRoutes.languageSettings),
                     ),
                   ],
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
 
-                _buildSectionTitle(context, 'Support & legal'),
-
-                const SizedBox(height: 12),
-
-                _buildSettingsCard(
+                _buildSection(
+                  title: 'Support & legal',
                   children: [
-                    _buildActionRow(
-                      context,
-                      icon: Icons.help_outline,
+                    _buildNavRow(
+                      icon: Icons.help_outline_rounded,
                       label: 'Help & support',
-                      onTap: () {
-                        context.push(GSWRoutes.helpAndSupport);
-                      },
+                      onTap: () => context.push(GSWRoutes.helpAndSupport),
                     ),
-
                     _divider(),
-
-                    _buildActionRow(
-                      context,
+                    _buildNavRow(
                       icon: Icons.description_outlined,
-                      label: 'Legal',
-                      onTap: () {
-                        context.push(GSWRoutes.legal);
-                      },
+                      label: 'Terms of service',
+                      onTap: () => context.push(GSWRoutes.termsOfService),
+                    ),
+                    _divider(),
+                    _buildNavRow(
+                      icon: Icons.lock_outline_rounded,
+                      label: 'Privacy policy',
+                      onTap: () => context.push(GSWRoutes.privacyPolicy),
+                    ),
+                    _divider(),
+                    _buildNavRow(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Refunds and other policies',
+                      onTap: () => context.push(GSWRoutes.legal),
                     ),
                   ],
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 28),
 
-                _buildSettingsCard(
+                _buildCard(
                   children: [
-                    _buildActionRow(
-                      context,
-                      icon: Icons.logout,
+                    _buildNavRow(
+                      icon: Icons.logout_rounded,
                       label: 'Log out',
-                      isDestructive: true,
-                      color: GSWColors.textPrimary,
+                      showChevron: false,
                       onTap: _showLogoutSheet,
                     ),
-
-                    _buildActionRow(
-                      context,
-                      icon: Icons.delete_outline,
+                    _buildNavRow(
+                      icon: Icons.delete_outline_rounded,
                       label: 'Delete account',
-                      isDestructive: true,
                       color: GSWColors.error,
-                      onTap: () async {
-                        context.push(GSWRoutes.deleteAccount);
-                      },
+                      showChevron: false,
+                      onTap: () => context.push(GSWRoutes.deleteAccount),
                     ),
                   ],
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 28),
 
-                Center(
-                  child: Text(
-                    'GetSetWell is operated by Get Set Fit LLC, licence 2541939, Sharjah Media City. support@getsetwell.com · WhatsApp +971 50 525 1393',
-                    style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textTertiary),
+                Text(
+                  'GetSetWell is operated by Get Set Fit LLC, licence 2541939, Sharjah Media City. '
+                  'support@getsetwell.com · WhatsApp +971 50 525 1393',
+                  style: GSWTextStyles.bodyExtraSmall.copyWith(
+                    height: 16 / 11,
+                    color: GSWColors.textTertiary,
                   ),
                 ),
               ],
@@ -301,111 +296,87 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Log out sheet (12.8, Figma 1077:3707)
+  // ---------------------------------------------------------------------------
+
   void _showLogoutSheet() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return Container(
-          width: double.infinity,
-          decoration: const BoxDecoration(
-            color: GSWColors.backgroundPrimary,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: GSWColors.neutral700,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
+      barrierColor: GSWColors.scrim,
+      enableDrag: false,
+      builder: (_) => GSWSheetDragDismiss(
+        child: Builder(builder: (sheetContext) {
+        return _LogoutSheet(
+          onLogOut: () async {
+            try {
+              await PushNotificationService().deleteCurrentDeviceToken();
+              await FirebaseAuth.instance.signOut();
 
-                  const SizedBox(height: 12),
+              if (!mounted || !sheetContext.mounted) return;
 
-                  Text(
-                    'Log out?',
-                    style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  Text(
-                    "You'll need a code on WhatsApp to log back in. "
-                    'Your sessions and requests stay as they are.',
-                    style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  GSWButton(
-                    size: GSWButtonSize.large,
-                    variant: GSWButtonVariant.primary,
-                    label: 'Log out',
-                    onPressed: () async {
-                      try {
-                        await PushNotificationService().deleteCurrentDeviceToken();
-
-                        await FirebaseAuth.instance.signOut();
-
-                        if (!mounted) return;
-
-                        if (!sheetContext.mounted) {
-                          return;
-                        }
-
-                        Navigator.of(sheetContext).pop();
-
-                        context.go(GSWRoutes.onboarding);
-                      } catch (error) {
-                        debugPrint('Logout failed: $error');
-
-                        if (!mounted) return;
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Could not log out. Please try again.')),
-                        );
-                      }
-                    },
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  GSWButton(
-                    size: GSWButtonSize.large,
-                    variant: GSWButtonVariant.tertiary,
-                    label: 'Stay logged in',
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
+              Navigator.of(sheetContext).pop();
+              context.go(GSWRoutes.onboarding);
+            } catch (error) {
+              debugPrint('Logout failed: $error');
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Could not log out. Please try again.')),
+              );
+            }
+          },
+          onStay: () => Navigator.of(sheetContext).pop(),
         );
-      },
+      }),
+      ),
     );
   }
 
-  Widget _buildProfileCard(BuildContext context, _UserProfileData profile) {
+  // ---------------------------------------------------------------------------
+  // Pieces
+  // ---------------------------------------------------------------------------
+
+  Widget _buildLoadError() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'We could not load your profile.',
+            style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Check your connection and try again.',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          GSWButton(
+            label: 'Try again',
+            size: GSWButtonSize.medium,
+            variant: GSWButtonVariant.secondary,
+            onPressed: _reload,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIdentityCard(_UserProfileData profile) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: GSWColors.surfacePrimary,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,11 +397,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           width: 56,
                           height: 56,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return _buildProfileInitialAvatar(profile.fullName);
-                          },
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildInitials(profile.fullName),
                         )
-                      : _buildProfileInitialAvatar(profile.fullName),
+                      : _buildInitials(profile.fullName),
                 ),
               ),
 
@@ -442,14 +412,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   children: [
                     Text(
                       profile.fullName,
-                      style: GSWTextStyles.titleMedium.copyWith(color: GSWColors.textPrimary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GSWTextStyles.titleSmall.copyWith(
+                        height: 24 / 20,
+                        color: GSWColors.textPrimary,
+                      ),
                     ),
-
                     const SizedBox(height: 2),
-
                     Text(
                       _formatPhone(profile.phone),
-                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                      style: GSWTextStyles.bodyMedium.copyWith(
+                        fontSize: 13,
+                        height: 18 / 13,
+                        color: GSWColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -461,63 +438,200 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
           Text(
             '${profile.sessionCount} ${profile.sessionCount == 1 ? 'session' : 'sessions'}'
-            ' · member since ${_memberSinceLabel(profile.memberSince)}',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            ' · member since ${_monthYear(profile.memberSince)}',
+            style: GSWTextStyles.bodySmall.copyWith(
+              height: 16 / 12,
+              color: GSWColors.textTertiary,
+            ),
           ),
 
           const SizedBox(height: 10),
 
-          GSWButton(
-            size: GSWButtonSize.medium,
-            variant: GSWButtonVariant.secondary,
-            label: 'Edit your details',
-            onPressed: () async {
-              await context.push(GSWRoutes.editProfile);
-
-              if (!mounted) return;
-
-              setState(() {
-                _profileFuture = _loadProfile();
-              });
-            },
+          Material(
+            color: Colors.transparent,
+            shape: const StadiumBorder(side: BorderSide(color: GSWColors.surfaceInteractive)),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _openEditDetails,
+              child: SizedBox(
+                width: double.infinity,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Text(
+                    'Edit your details',
+                    textAlign: TextAlign.center,
+                    style: GSWTextStyles.labelMedium.copyWith(
+                      height: 16 / 14,
+                      color: GSWColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProfileInitialAvatar(String fullName) {
+  Widget _buildInitials(String fullName) {
     return Container(
-      color: GSWColors.backgroundPrimary,
       alignment: Alignment.center,
       child: Text(
         _initials(fullName),
-        style: GSWTextStyles.titleMedium.copyWith(
-          color: GSWColors.textPrimary,
-          fontWeight: FontWeight.w700,
+        style: GSWTextStyles.titleSmall.copyWith(height: 24 / 20, color: GSWColors.textPrimary),
+      ),
+    );
+  }
+
+  Widget _buildSection({required String title, required List<Widget> children}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GSWTextStyles.titleSmall.copyWith(height: 26 / 20, color: GSWColors.textPrimary),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(children: children),
+      ],
+    );
+  }
+
+  Widget _buildCard({required List<Widget> children}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: GSWColors.surfacePrimary,
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _rowIcon(IconData icon, Color color) => SizedBox(
+    width: 22,
+    height: 22,
+    child: Icon(icon, size: 22, color: color),
+  );
+
+  Widget _buildDetailRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color valueColor = GSWColors.textSecondary,
+    VoidCallback? onTap,
+  }) {
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      child: Row(
+        children: [
+          _rowIcon(icon, GSWColors.iconPrimary),
+          const SizedBox(width: 14),
+          SizedBox(
+            width: 132,
+            child: Text(
+              label,
+              style: GSWTextStyles.bodyLarge.copyWith(height: 22 / 16, color: GSWColors.textPrimary),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GSWTextStyles.bodyLarge.copyWith(height: 22 / 16, color: valueColor),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return row;
+
+    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: row);
+  }
+
+  Widget _buildNavRow({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    String? trailingValue,
+    Color color = GSWColors.textPrimary,
+    bool showChevron = true,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        child: Row(
+          children: [
+            _rowIcon(icon, color == GSWColors.textPrimary ? GSWColors.iconPrimary : color),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                label,
+                style: GSWTextStyles.bodyLarge.copyWith(height: 22 / 16, color: color),
+              ),
+            ),
+            if (trailingValue != null) ...[
+              const SizedBox(width: 14),
+              Text(
+                trailingValue,
+                style: GSWTextStyles.bodyMedium.copyWith(
+                  height: 20 / 14,
+                  color: GSWColors.textSecondary,
+                ),
+              ),
+            ],
+            if (showChevron) ...[
+              const SizedBox(width: 14),
+              SvgPicture.asset(
+                GSWIcons.arrowheadRight,
+                width: 16.667,
+                height: 20,
+                colorFilter: const ColorFilter.mode(GSWColors.iconSecondary, BlendMode.srcIn),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
 
-  String _memberSinceLabel(DateTime date) {
-    const months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    return '${months[date.month - 1]} ${date.year}';
+  Widget _divider() {
+    return const SizedBox(
+      height: 1,
+      width: double.infinity,
+      child: ColoredBox(color: GSWColors.surfaceInteractive),
+    );
   }
+
+  // ---------------------------------------------------------------------------
+  // Formatting
+  // ---------------------------------------------------------------------------
+
+  static const List<String> _monthsLong = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  /// "September 2026". Input is already Dubai time.
+  String _monthYear(DateTime dubai) => '${_monthsLong[dubai.month - 1]} ${dubai.year}';
 
   String _formatPhone(String phone) {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
@@ -534,109 +648,90 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String _initials(String fullName) {
     final parts = fullName.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty).toList();
 
-    if (parts.isEmpty) {
-      return '';
-    }
-
-    if (parts.length == 1) {
-      return parts.first[0].toUpperCase();
-    }
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
 
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
+}
 
-  Widget _buildSectionTitle(BuildContext context, String label) {
-    return Text(label, style: GSWTextStyles.titleSmall.copyWith(color: GSWColors.textPrimary));
-  }
+/// 12.8 Log out (Figma 1077:3707). Bottom sheet per the shared sheet spec.
+class _LogoutSheet extends StatefulWidget {
+  const _LogoutSheet({required this.onLogOut, required this.onStay});
 
-  Widget _buildSettingsCard({required List<Widget> children}) {
+  final Future<void> Function() onLogOut;
+  final VoidCallback onStay;
+
+  @override
+  State<_LogoutSheet> createState() => _LogoutSheetState();
+}
+
+class _LogoutSheetState extends State<_LogoutSheet> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+      decoration: const BoxDecoration(
+        color: GSWColors.backgroundPrimary,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(GSWRadius.sheet)),
       ),
-      child: Column(children: children),
-    );
-  }
-
-  Widget _buildRow(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, size: 22, color: GSWColors.textSecondary),
-
-          const SizedBox(width: 14),
-
-          Expanded(
-            child: Text(
-              label,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 220),
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              softWrap: true,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionRow(
-    BuildContext context, {
-    required IconData icon,
-    Color? color,
-    required String label,
-    required VoidCallback onTap,
-    bool isDestructive = false,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        child: Row(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 28 + bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(icon, size: 22, color: isDestructive ? color : GSWColors.textSecondary),
-
-            const SizedBox(width: 14),
-
-            Expanded(
-              child: Text(
-                label,
-                style: GSWTextStyles.bodyMedium.copyWith(
-                  color: isDestructive ? color : GSWColors.textPrimary,
+            SizedBox(
+              height: 28,
+              child: Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: GSWColors.surfaceInteractive,
+                    borderRadius: BorderRadius.circular(GSWRadius.full),
+                  ),
                 ),
               ),
             ),
-
-            if (!isDestructive) const Icon(Icons.chevron_right, color: GSWColors.textSecondary),
+            Text(
+              'Log out?',
+              style: GSWTextStyles.titleLarge.copyWith(height: 1, color: GSWColors.textPrimary),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              "You'll need a code by SMS to log back in. "
+              'Your sessions and requests stay as they are.',
+              style: GSWTextStyles.bodyMedium.copyWith(
+                height: 20 / 14,
+                color: GSWColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            GSWButton(
+              label: 'Log out',
+              isLoading: _busy,
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      await widget.onLogOut();
+                      if (mounted) setState(() => _busy = false);
+                    },
+            ),
+            const SizedBox(height: 20),
+            GSWButton(
+              label: 'Stay logged in',
+              variant: GSWButtonVariant.tertiary,
+              onPressed: widget.onStay,
+            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _divider() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16),
-      child: Divider(height: 1, color: GSWColors.neutral700),
     );
   }
 }

@@ -75,8 +75,6 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const uaeMobilePattern =
   /^\+971(50|52|54|55|56|58)\d{7}$/;
-const internationalPhonePattern =
-  /^\+[1-9]\d{7,14}$/;
 type JsonObject = Record<string, unknown>;
 type RequestType =
   | "trainer_request"
@@ -96,6 +94,88 @@ type AuthenticatedCustomer = {
   phone: string;
   city: string;
 };
+// Amounts the server charges for a session. Written to the sessions price
+// snapshot (session_rate, service_fee, total_amount) and returned to the app.
+type ServerPricing = {
+  sessionRate: number;
+  serviceFee: number;
+  totalAmount: number;
+};
+// Result of public.check_trainer_slot (see migration 20261013170200).
+type SlotCheck =
+  | "ok"
+  | "past"
+  | "not_offered"
+  | "taken";
+type TrainerSessionDatabaseResult = {
+  errors: string[];
+  priceChanged: boolean;
+  slot: SlotCheck | null;
+  pricing: ServerPricing | null;
+};
+const SERVICE_FEE_RATE = 0.05;
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+function buildServerPricing(
+  sessionRate: number,
+): ServerPricing {
+  const rate = roundMoney(sessionRate);
+  const fee = roundMoney(rate * SERVICE_FEE_RATE);
+  return {
+    sessionRate: rate,
+    serviceFee: fee,
+    totalAmount: roundMoney(rate + fee),
+  };
+}
+type DatabaseErrorLike = {
+  code?: unknown;
+  message?: unknown;
+};
+function databaseErrorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null) {
+    const code = (error as DatabaseErrorLike).code;
+    if (typeof code === "string") {
+      return code;
+    }
+  }
+  return "";
+}
+function databaseErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null) {
+    const message = (error as DatabaseErrorLike).message;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+  return "";
+}
+// Maps known database errors to the app-facing HTTP contract.
+// Returns null when the error is not a known business rule.
+function mapKnownDatabaseError(
+  error: unknown,
+): Response | null {
+  const code = databaseErrorCode(error);
+  const message = databaseErrorMessage(error);
+  // sessions_no_trainer_overlap exclusion constraint.
+  if (
+    code === "23P01" ||
+    message.includes("sessions_no_trainer_overlap")
+  ) {
+    return jsonResponse({ error: "SLOT_TAKEN" }, 409);
+  }
+  // enforce_open_concierge_request_limit trigger.
+  if (message.includes("ACTIVE_CONCIERGE_EXISTS")) {
+    return jsonResponse(
+      { error: "ACTIVE_CONCIERGE_EXISTS" },
+      409,
+    );
+  }
+  return null;
+}
 const supabaseUrl =
   Deno.env.get("SUPABASE_URL");
 const serviceRoleKey =
@@ -298,6 +378,12 @@ function validateTrainerSessionRequest(
     errors.push(
       "scheduled_at is invalid",
     );
+  } else if (
+    Date.parse(body.scheduled_at) <= Date.now()
+  ) {
+    errors.push(
+      "scheduled_at is in the past",
+    );
   }
   // Customer's original location preference.
   if (
@@ -335,9 +421,9 @@ function validateTrainerSessionRequest(
       "location_label is required",
     );
   }
-  // Prices sent by Flutter for now.
-  // We will verify these against trainer/backend
-  // prices in the database-validation step.
+  // Prices sent by Flutter are only compared with the server price in
+  // validateTrainerSessionDatabaseRules. The server values are what get
+  // stored and charged; a mismatch returns 409 PRICE_CHANGED.
   if (
     typeof body.session_rate !== "number" ||
     !Number.isFinite(
@@ -409,8 +495,14 @@ function validateTrainerSessionRequest(
 }
 async function validateTrainerSessionDatabaseRules(
   body: JsonObject,
-): Promise<string[]> {
+): Promise<TrainerSessionDatabaseResult> {
   const errors: string[] = [];
+  const result: TrainerSessionDatabaseResult = {
+    errors,
+    priceChanged: false,
+    slot: null,
+    pricing: null,
+  };
   const trainerId =
     body.trainer_id as string;
   const {
@@ -436,9 +528,10 @@ async function validateTrainerSessionDatabaseRules(
     trainer.is_active !== true ||
     trainer.is_verified !== true
   ) {
-    return [
+    errors.push(
       "trainer is no longer available",
-    ];
+    );
+    return result;
   }
   const venueChoice =
     body.venue_choice as string;
@@ -454,9 +547,10 @@ async function validateTrainerSessionDatabaseRules(
     !Number.isFinite(standardRate) ||
     standardRate <= 0
   ) {
-    return [
+    errors.push(
       "trainer session price is unavailable",
-    ];
+    );
+    return result;
   }
   let expectedSessionRate =
     standardRate;
@@ -505,17 +599,14 @@ async function validateTrainerSessionDatabaseRules(
       "customer training place is invalid",
     );
   }
-  const expectedServiceFee =
-    expectedSessionRate * 0.05;
-  const expectedTotal =
-    expectedSessionRate +
-    expectedServiceFee;
-  const submittedSessionRate =
-    Number(body.session_rate);
-  const submittedServiceFee =
-    Number(body.service_fee);
-  const submittedTotal =
-    Number(body.total);
+  if (errors.length > 0) {
+    return result;
+  }
+  // Server-side price. These are the amounts stored on the session and
+  // returned to the app; the client values are only compared.
+  const pricing =
+    buildServerPricing(expectedSessionRate);
+  result.pricing = pricing;
   const moneyMatches = (
     left: number,
     right: number,
@@ -524,35 +615,53 @@ async function validateTrainerSessionDatabaseRules(
     0.01;
   if (
     !moneyMatches(
-      submittedSessionRate,
-      expectedSessionRate,
-    )
-  ) {
-    errors.push(
-      "session rate does not match backend price",
-    );
-  }
-  if (
+      Number(body.session_rate),
+      pricing.sessionRate,
+    ) ||
     !moneyMatches(
-      submittedServiceFee,
-      expectedServiceFee,
-    )
-  ) {
-    errors.push(
-      "service fee does not match backend price",
-    );
-  }
-  if (
+      Number(body.service_fee),
+      pricing.serviceFee,
+    ) ||
     !moneyMatches(
-      submittedTotal,
-      expectedTotal,
+      Number(body.total),
+      pricing.totalAmount,
     )
   ) {
+    result.priceChanged = true;
+    return result;
+  }
+  // Slot must be in the future, inside the trainer's declared weekly
+  // availability (same rules as get_trainer_booking_availability) and free.
+  const {
+    data: slotData,
+    error: slotError,
+  } = await supabaseAdmin.rpc(
+    "check_trainer_slot",
+    {
+      p_trainer_id: trainerId,
+      p_starts_at: new Date(
+        Date.parse(body.scheduled_at as string),
+      ).toISOString(),
+    },
+  );
+  if (slotError) {
+    throw slotError;
+  }
+  const slot =
+    typeof slotData === "string"
+      ? (slotData as SlotCheck)
+      : "not_offered";
+  result.slot = slot;
+  if (slot === "past") {
     errors.push(
-      "total does not match backend price",
+      "scheduled_at is in the past",
+    );
+  } else if (slot === "not_offered") {
+    errors.push(
+      "scheduled_at is outside the trainer availability",
     );
   }
-  return errors;
+  return result;
 }
 function validateConciergeMatch(
   body: JsonObject,
@@ -1274,6 +1383,7 @@ async function useExistingConciergeRequest(
 async function insertConfirmedSession(
   body: JsonObject,
   bookingRequestId: string,
+  pricing: ServerPricing,
 ) {
   const {
     data,
@@ -1305,6 +1415,16 @@ async function insertConfirmedSession(
     body.message.trim().length > 0
       ? body.message.trim()
       : null,
+  // Price snapshot: validated server-side amounts, never client values.
+  session_rate:
+    pricing.sessionRate,
+  service_fee:
+    pricing.serviceFee,
+  total_amount:
+    pricing.totalAmount,
+  // TODO(Tap): when Tap checkout is wired, insert with a pending-payment
+  // status here and let the Tap payment confirmation (webhook) set
+  // status = "confirmed". Until then the session is confirmed immediately.
   status:
     "confirmed",
 })
@@ -1319,7 +1439,10 @@ async function insertConfirmedSession(
   venue_choice,
   goal,
   notes,
-  status
+  status,
+  session_rate,
+  service_fee,
+  total_amount
 `)
     .single();
   if (error) {
@@ -1638,28 +1761,59 @@ const validationErrors =
       );
     }
   }
+  let serverPricing: ServerPricing | null = null;
   try {
-const databaseErrors =
-  isTrainerSessionRequest
-    ? await validateTrainerSessionDatabaseRules(
-        effectiveBody,
-      )
-    : await validateDatabaseRules(
-        effectiveBody,
-        requestType,
-      );
-    if (
-      databaseErrors.length > 0
-    ) {
-      return jsonResponse(
-        {
-          error:
-            "Validation failed",
-          details:
-            databaseErrors,
-        },
-        400,
-      );
+    if (isTrainerSessionRequest) {
+      const sessionCheck =
+        await validateTrainerSessionDatabaseRules(
+          effectiveBody,
+        );
+      if (sessionCheck.errors.length > 0) {
+        return jsonResponse(
+          {
+            error:
+              "Validation failed",
+            details:
+              sessionCheck.errors,
+          },
+          400,
+        );
+      }
+      if (sessionCheck.priceChanged) {
+        return jsonResponse(
+          { error: "PRICE_CHANGED" },
+          409,
+        );
+      }
+      if (sessionCheck.slot === "taken") {
+        return jsonResponse(
+          { error: "SLOT_TAKEN" },
+          409,
+        );
+      }
+      if (!sessionCheck.pricing) {
+        throw new Error("SERVER_PRICING_MISSING");
+      }
+      serverPricing = sessionCheck.pricing;
+    } else {
+      const databaseErrors =
+        await validateDatabaseRules(
+          effectiveBody,
+          requestType,
+        );
+      if (
+        databaseErrors.length > 0
+      ) {
+        return jsonResponse(
+          {
+            error:
+              "Validation failed",
+            details:
+              databaseErrors,
+          },
+          400,
+        );
+      }
     }
   } catch (error) {
     console.error(
@@ -1694,12 +1848,13 @@ if (isConciergeBooking) {
     );
 }
 let session = null;
-if (isTrainerSessionRequest) {
+if (isTrainerSessionRequest && serverPricing) {
   try {
     session =
       await insertConfirmedSession(
         effectiveBody,
         bookingRequest.id,
+        serverPricing,
       );
   } catch (error) {
     if (isConciergeBooking) {
@@ -1758,25 +1913,49 @@ if (!isTrainerSessionRequest) {
     );
   }
 }
+const scheduledAtUtc =
+  typeof session?.scheduled_at === "string"
+    ? new Date(session.scheduled_at).toISOString()
+    : null;
 return jsonResponse(
   {
     success: true,
     request_type: requestType,
+    // id is the session id for a confirmed booking, else the request id.
+    id:
+      session?.id ?? bookingRequest.id,
     request_id: bookingRequest.id,
     reference_code:
       bookingRequest.reference_code,
     session_id:
       session?.id ?? null,
+    // ISO 8601 UTC, e.g. 2026-10-14T03:00:00.000Z
     scheduled_at:
-      session?.scheduled_at ?? null,
+      scheduledAtUtc,
     location_label:
       session?.location_label ?? null,
     status:
       session?.status ?? null,
+    session_rate:
+      session ? Number(session.session_rate) : null,
+    service_fee:
+      session ? Number(session.service_fee) : null,
+    total_amount:
+      session ? Number(session.total_amount) : null,
   },
   201,
 );
   } catch (error) {
+    const mapped =
+      mapKnownDatabaseError(error);
+    if (mapped) {
+      console.warn(
+        "Booking rejected by database rule:",
+        databaseErrorCode(error),
+        databaseErrorMessage(error),
+      );
+      return mapped;
+    }
     console.error(
       "Booking request insert failed:",
       error,

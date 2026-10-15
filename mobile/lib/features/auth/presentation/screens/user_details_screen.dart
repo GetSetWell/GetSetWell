@@ -1,18 +1,22 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
+import 'package:mobile/core/widgets/inputs/gsw_checkbox.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
+import 'package:mobile/features/legal/presentation/widgets/legal_agreement_text.dart';
 
 import '../../data/repositories/profile_repository.dart';
 
+/// 3.5 Your details. Name only: Dubai is the only live city, so it is saved
+/// without asking (Figma note 816:2620). The checkbox records that the
+/// person is 18 or over and agrees to the Terms and Privacy Policy.
 class UserDetailsScreen extends StatefulWidget {
-  const UserDetailsScreen({
-    super.key,
-    required this.intent,
-    required this.onCompleted,
-  });
+  const UserDetailsScreen({super.key, required this.intent, required this.onCompleted});
 
   final AuthFlowIntent intent;
   final Future<void> Function() onCompleted;
@@ -26,66 +30,40 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
   final ProfileRepository _profileRepository = ProfileRepository();
 
-  static const String _selectedCity = 'Dubai';
+  /// The only live city (v1.2 policy).
+  static const String _city = 'Dubai';
+
+  bool _agreed = false;
 
   bool _isSaving = false;
+
   String? _errorMessage;
 
   @override
-  void initState() {
-    super.initState();
-
-    _nameController.addListener(_handleNameChanged);
-  }
-
-  @override
   void dispose() {
-    _nameController.removeListener(_handleNameChanged);
-
     _nameController.dispose();
 
     super.dispose();
   }
 
-  void _handleNameChanged() {
-    if (_errorMessage != null) {
-      setState(() {
-        _errorMessage = null;
-      });
-
-      return;
-    }
-
-    setState(() {});
-  }
-
-  bool get _canContinue {
-    return _nameController.text.trim().isNotEmpty && !_isSaving;
-  }
+  bool get _canContinue => _nameController.text.trim().isNotEmpty && _agreed && !_isSaving;
 
   String get _buttonLabel {
-    if (_isSaving) {
-      switch (widget.intent.entryPoint) {
-        case AuthEntryPoint.getStarted:
-          return 'Creating account...';
-
-        case AuthEntryPoint.helpMeChoose:
-          return 'Saving...';
-
-        case AuthEntryPoint.existingAccount:
-          return 'Saving...';
-      }
+    if (widget.intent.type == AuthFlowType.returnToCaller) {
+      return 'Continue booking';
     }
 
     switch (widget.intent.entryPoint) {
-      case AuthEntryPoint.getStarted:
-        return 'Create account';
-
       case AuthEntryPoint.helpMeChoose:
-        return 'Send request';
+        return 'Send my request';
 
+      case AuthEntryPoint.getStarted:
+        return 'Create my account';
+
+      // Reached from 3.9 "Create my account": the button reads Continue
+      // (Figma note 1006:3364).
       case AuthEntryPoint.existingAccount:
-        return 'Continue to trainers';
+        return 'Continue';
     }
   }
 
@@ -100,22 +78,28 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
     });
 
     try {
-      await _profileRepository.saveBasicProfile(
-        fullName: _nameController.text.trim(),
-        city: _selectedCity,
-      );
-
-      if (!mounted) return;
-
-      await widget.onCompleted();
+      await _profileRepository.saveBasicProfile(fullName: _nameController.text.trim(), city: _city);
     } catch (error) {
-      debugPrint('Failed to save profile: $error');
+      if (kDebugMode) {
+        debugPrint('Failed to save profile: $error');
+      }
 
       if (!mounted) return;
 
       setState(() {
-        _errorMessage = 'We could not save your details. Please try again.';
+        _isSaving = false;
+        _errorMessage = 'We could not save your name. Please try again.';
       });
+
+      return;
+    }
+
+    if (!mounted) return;
+
+    try {
+      // Stays busy until the next screen is open, so a second tap cannot
+      // send the request twice.
+      await widget.onCompleted();
     } finally {
       if (mounted) {
         setState(() {
@@ -127,146 +111,105 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: GSWColors.backgroundPrimary,
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(
-                  context,
-                ).copyWith(overscroll: false),
-                child: SingleChildScrollView(
-                  physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 32, 16, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'ALMOST THERE',
-                        style: GSWTextStyles.displaySmall.copyWith(
-                          color: GSWColors.textPrimary,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      Text(
-                        'Your name and city, so your trainer knows who they are meeting.',
-                        style: GSWTextStyles.bodyMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                        ),
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      GSWTextField(
-                        size: GSWTextFieldSize.large,
-                        controller: _nameController,
-                        label: 'Full name',
-                        hintText: 'Nada Khoury',
-                        textInputAction: TextInputAction.done,
-                        keyboardType: TextInputType.name,
-                        errorText: _errorMessage,
-                        onChanged: (_) {
-                          setState(() {});
-                        },
-                        onComplete: (_) {
-                          if (_canContinue) {
-                            _continue();
-                          }
-                        },
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      Text(
-                        'City',
-                        style: GSWTextStyles.labelMedium.copyWith(
-                          color: GSWColors.textSecondary,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      _buildCities(),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
-            _buildBottomBar(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCities() {
-    return Row(
-      children: [
-        _buildCityOption(city: 'Dubai', selected: true),
-
-        const SizedBox(width: 8),
-
-        _buildCityOption(city: 'Abu Dhabi', soon: true),
-
-        const SizedBox(width: 8),
-
-        _buildCityOption(city: 'Sharjah', soon: true),
-      ],
-    );
-  }
-
-  Widget _buildCityOption({
-    required String city,
-    bool selected = false,
-    bool soon = false,
-  }) {
-    return Expanded(
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? GSWColors.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            width: 1,
-            color: selected ? GSWColors.primary : GSWColors.borderSecondary,
-          ),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+    // Usually reached with go(), which leaves nothing to pop: Android back then
+    // opens Home instead of closing the app.
+    return PopScope(
+      canPop: context.canPop(),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(GSWRoutes.home);
+      },
+      child: Scaffold(
+        backgroundColor: GSWColors.backgroundPrimary,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: Column(
             children: [
-              Text(
-                city,
-                style: GSWTextStyles.labelLarge.copyWith(
-                  color: selected
-                      ? GSWColors.textInverse
-                      : GSWColors.textTertiary,
+              Expanded(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
+                  child: SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Almost there',
+                          style: GSWTextStyles.titleLarge.copyWith(
+                            color: GSWColors.textPrimary,
+                            height: 30 / 24,
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        Text(
+                          "Just your name, so your trainer knows who they're meeting.",
+                          style: GSWTextStyles.bodyMedium.copyWith(
+                            color: GSWColors.textSecondary,
+                            height: 20 / 14,
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        GSWTextField(
+                          size: GSWTextFieldSize.large,
+                          controller: _nameController,
+                          label: 'Full name',
+                          hintText: 'Your full name',
+                          textInputAction: TextInputAction.done,
+                          keyboardType: TextInputType.name,
+                          errorText: _errorMessage,
+                          onChanged: (_) {
+                            setState(() {
+                              _errorMessage = null;
+                            });
+                          },
+                          // Keyboard Done submits when everything is filled in.
+                          onComplete: (_) {
+                            if (_canContinue) {
+                              _continue();
+                            }
+                          },
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        _buildConsent(),
+                      ],
+                    ),
+                  ),
                 ),
               ),
 
-              if (soon) ...[
-                const SizedBox(width: 6),
-
-                Text(
-                  'Soon',
-                  style: GSWTextStyles.bodySmall.copyWith(
-                    color: GSWColors.textTertiary,
-                  ),
-                ),
-              ],
+              _buildBottomBar(),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildConsent() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        GSWCheckbox(
+          value: _agreed,
+          onChanged: _isSaving
+              ? null
+              : (value) {
+                  setState(() {
+                    _agreed = value;
+                  });
+                },
+        ),
+
+        const SizedBox(width: 8),
+
+        const Expanded(child: LegalAgreementText.signUpConsent()),
+      ],
     );
   }
 
@@ -275,10 +218,9 @@ class _UserDetailsScreenState extends State<UserDetailsScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
       child: GSWButton(
         size: GSWButtonSize.large,
-        variant: _canContinue
-            ? GSWButtonVariant.primary
-            : GSWButtonVariant.disabled,
+        variant: _canContinue || _isSaving ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
         label: _buttonLabel,
+        isLoading: _isSaving,
         onPressed: _canContinue ? _continue : null,
       ),
     );

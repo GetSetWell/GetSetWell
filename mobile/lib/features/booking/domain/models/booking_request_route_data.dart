@@ -38,4 +38,23 @@ class BookingRequestRouteData {
   /// Date and time must still be selected again from
   /// the trainer's current availability.
   final bool isRepeatBooking;
+
+  /// Reads sessions.customer_training_place ('gym' | 'home' | 'outdoors').
+  static CustomerTrainingPlace? trainingPlaceFromDb(Object? value) {
+    return switch (value?.toString().trim()) {
+      'gym' => CustomerTrainingPlace.gym,
+      'home' => CustomerTrainingPlace.home,
+      'outdoors' => CustomerTrainingPlace.outdoors,
+      _ => null,
+    };
+  }
+
+  /// Reads sessions.venue_choice ('customer_choice' | 'trainer_private_gym').
+  static BookingVenueChoice? venueChoiceFromDb(Object? value) {
+    return switch (value?.toString().trim()) {
+      'customer_choice' => BookingVenueChoice.customerChoice,
+      'trainer_private_gym' => BookingVenueChoice.trainerPrivateGym,
+      _ => null,
+    };
+  }
 }

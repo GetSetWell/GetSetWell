@@ -4,10 +4,14 @@ import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:mobile/features/booking/domain/models/booking_request_route_data.dart';
 import 'package:mobile/features/trainers/domain/models/trainer.dart';
+import 'package:mobile/features/trainers/domain/models/trainer_specialty.dart';
+import 'package:mobile/features/trainers/presentation/widgets/trainer_photo.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_specialty_card.dart';
 import 'package:mobile/features/trainers/presentation/widgets/trainer_summary.dart';
 
@@ -16,33 +20,31 @@ import '../widgets/trainer_session_detail_row.dart';
 import '../widgets/trainer_verification_row.dart';
 import '../widgets/trainer_verification_sheet.dart';
 
+/// Figma 8.4 Trainer profile (818:3723).
 class TrainerProfileScreen extends StatelessWidget {
   const TrainerProfileScreen({super.key, required this.trainer});
 
   final Trainer trainer;
 
-  double get _sessionRate {
-    return trainer.pricePerSession?.toDouble() ?? 0;
-  }
+  /// Session rate before the fee. Null when the trainer has no rate yet.
+  double? get _sessionRate => trainer.pricePerSession;
 
-  double get _serviceFee {
-    return _sessionRate * 0.05;
-  }
+  /// Specialities that may be shown. Anything rehabilitation-related is never
+  /// displayed (v1.2 policy).
+  List<TrainerSpecialty> get _visibleSpecialties {
+    return trainer.specialties.where((specialty) {
+      final slug = specialty.slug.toLowerCase();
+      final name = specialty.name.toLowerCase();
 
-  double get _totalPrice {
-    return _sessionRate + _serviceFee;
-  }
-
-  String _formatMoney(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-
-    return value.toStringAsFixed(2);
+      return !slug.contains('rehab') && !name.contains('rehab');
+    }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    final showChecks = TrainerVerificationSheet.hasChecks(trainer.verificationChecks);
+    final languages = trainer.languages.where((language) => language.trim().isNotEmpty).toList();
+
     return Scaffold(
       backgroundColor: GSWColors.backgroundPrimary,
       body: ScrollConfiguration(
@@ -54,55 +56,58 @@ class TrainerProfileScreen extends StatelessWidget {
               _buildHero(context),
 
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildTrainerSummary(context),
+                    TrainerNameAndPrice(
+                      name: trainer.fullName,
+                      service: trainer.primaryService ?? '',
+                      price: _sessionRate,
+                      large: true,
+                    ),
 
                     const SizedBox(height: 12),
 
-                    TrainerLocation(location: trainer.serviceArea ?? 'Dubai'),
-
-                    const SizedBox(height: 12),
-
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: trainer.languages
-                          .map((language) => TrainerLanguagePill(label: language))
-                          .toList(),
+                    TrainerLocation(
+                      location: trainer.serviceArea?.trim().isNotEmpty == true
+                          ? trainer.serviceArea!
+                          : 'Dubai',
                     ),
 
-                    const SizedBox(height: 24),
+                    if (languages.isNotEmpty) ...[
+                      const SizedBox(height: 12),
 
-                    TrainerVerificationRow(
-                      onTap: () {
-                        TrainerVerificationSheet.show(
-                          context,
-                          trainerName: trainer.fullName,
-                          items: trainer.verificationChecks,
-                        );
-                      },
-                    ),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: languages
+                            .map((language) => TrainerLanguagePill(label: language))
+                            .toList(),
+                      ),
+                    ],
 
-                    const SizedBox(height: 24),
+                    if (showChecks) ...[
+                      const SizedBox(height: 24),
 
-                    _buildGoodFitSection(context),
+                      TrainerVerificationRow(
+                        onTap: () {
+                          TrainerVerificationSheet.show(
+                            context,
+                            trainerName: trainer.fullName,
+                            items: trainer.verificationChecks,
+                            closeLabel: 'Back to profile',
+                          );
+                        },
+                      ),
+                    ],
 
-                    const SizedBox(height: 24),
+                    ..._section(_buildGoodFitSection()),
+                    ..._section(_buildSpecialties()),
+                    ..._section(_buildSessionDetails()),
+                    ..._section(_buildAbout()),
 
-                    _buildSpecialties(context),
-
-                    const SizedBox(height: 24),
-
-                    _buildSessionDetails(context),
-
-                    const SizedBox(height: 24),
-
-                    _buildAbout(context),
-
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),
@@ -111,6 +116,19 @@ class TrainerProfileScreen extends StatelessWidget {
         ),
       ),
       bottomNavigationBar: _buildBookingFooter(context),
+    );
+  }
+
+  List<Widget> _section(Widget? child) {
+    if (child == null) return const <Widget>[];
+
+    return [const SizedBox(height: 24), child];
+  }
+
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary, height: 1),
     );
   }
 
@@ -125,46 +143,52 @@ class TrainerProfileScreen extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (trainer.profileImageUrl != null && trainer.profileImageUrl!.isNotEmpty)
-            Image.network(
-              trainer.profileImageUrl!,
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
-            ),
+          TrainerPhoto(name: trainer.fullName, imageUrl: trainer.profileImageUrl),
 
-          const DecoratedBox(
+          // Figma: gradient covers the lower 178px (from y 142 of 320),
+          // transparent to 50% at the midpoint to solid Background/Primary.
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                stops: [0.45, 0.78, 1],
-                colors: [Colors.transparent, Color(0x99000D1B), GSWColors.backgroundPrimary],
+                stops: const [0.44, 0.72, 1],
+                colors: [
+                  GSWColors.backgroundPrimary.withValues(alpha: 0),
+                  GSWColors.backgroundPrimary.withValues(alpha: 0.5),
+                  GSWColors.backgroundPrimary,
+                ],
               ),
             ),
           ),
 
           SafeArea(
+            bottom: false,
             child: Align(
               alignment: Alignment.topLeft,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 0, 0),
-                child: Container(
-                  width: 46,
-                  height: 46,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: GSWColors.borderSecondary),
-                    color: Colors.black.withValues(alpha: 0.4),
-                  ),
-                  child: IconButton(
-                    onPressed: () {
-                      context.pop();
-                    },
-                    icon: SvgPicture.asset(
-                      GSWIcons.arrowheadLeft,
-                      width: 30,
-                      height: 30,
-                      colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+                padding: const EdgeInsets.fromLTRB(24, 24, 0, 0),
+                child: Material(
+                  color: GSWColors.backgroundPrimary.withValues(alpha: 0.4),
+                  shape: const CircleBorder(side: BorderSide(color: GSWColors.borderSecondary)),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => context.pop(),
+                    child: SizedBox(
+                      width: 46,
+                      height: 46,
+                      child: Center(
+                        child: SvgPicture.asset(
+                          GSWIcons.arrowheadLeft,
+                          width: 30,
+                          height: 30,
+                          semanticsLabel: 'Back',
+                          colorFilter: const ColorFilter.mode(
+                            GSWColors.iconAccent,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -177,75 +201,18 @@ class TrainerProfileScreen extends StatelessWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // TRAINER SUMMARY
-  // ---------------------------------------------------------------------------
-
-  Widget _buildTrainerSummary(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                trainer.fullName.toUpperCase(),
-                style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
-              ),
-
-              const SizedBox(height: 4),
-
-              Text(
-                trainer.primaryService ?? '',
-                style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(width: 16),
-
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              'AED ${_formatMoney(_sessionRate)}',
-              style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textAccent),
-            ),
-
-            Text(
-              '/session',
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-            ),
-
-            const SizedBox(height: 2),
-
-            Text(
-              'AED ${_formatMoney(_totalPrice)} total',
-              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // ---------------------------------------------------------------------------
   // GOOD FIT
   // ---------------------------------------------------------------------------
 
-  Widget _buildGoodFitSection(BuildContext context) {
-    if (trainer.fitPoints.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget? _buildGoodFitSection() {
+    final points = trainer.fitPoints.where((point) => point.text.trim().isNotEmpty).toList();
+
+    if (points.isEmpty) return null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'A good fit if',
-          style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-        ),
+        _sectionTitle('A good fit if'),
 
         const SizedBox(height: 8),
 
@@ -254,32 +221,42 @@ class TrainerProfileScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(GSWRadius.card),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (int index = 0; index < trainer.fitPoints.length; index++) ...[
+              for (int index = 0; index < points.length; index++) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '•',
-                      style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textAccent),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Container(
+                        width: 4,
+                        height: 4,
+                        decoration: const BoxDecoration(
+                          color: GSWColors.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                     ),
 
                     const SizedBox(width: 8),
 
                     Expanded(
                       child: Text(
-                        trainer.fitPoints[index].text,
-                        style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+                        points[index].text,
+                        style: GSWTextStyles.bodyMedium.copyWith(
+                          color: GSWColors.textSecondary,
+                          height: 20 / 14,
+                        ),
                       ),
                     ),
                   ],
                 ),
 
-                if (index != trainer.fitPoints.length - 1) const SizedBox(height: 8),
+                if (index != points.length - 1) const SizedBox(height: 8),
               ],
             ],
           ),
@@ -296,51 +273,38 @@ class TrainerProfileScreen extends StatelessWidget {
     switch (slug) {
       case 'beginner-yoga':
         return GSWIcons.yoga;
-
       case 'mobility':
         return GSWIcons.mobility;
-
       case 'pre-postnatal':
         return GSWIcons.prePostNatal;
-
       case 'core-strength':
         return GSWIcons.coreStrength;
-
       case 'strength-training':
         return GSWIcons.dumbell;
-
       case 'muscle-building':
         return GSWIcons.muscleBuilding;
-
       case 'conditioning':
         return GSWIcons.conditioning;
-
       case 'fat-loss':
         return GSWIcons.fatLoss;
-
       case 'functional-training':
         return GSWIcons.functionalTraining;
-
       case 'general-fitness':
         return GSWIcons.generalFitness;
-
       default:
-        return GSWIcons.yoga;
+        return GSWIcons.generalFitness;
     }
   }
 
-  Widget _buildSpecialties(BuildContext context) {
-    if (trainer.specialties.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget? _buildSpecialties() {
+    final specialties = _visibleSpecialties;
+
+    if (specialties.isEmpty) return null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Specialities',
-          style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-        ),
+        _sectionTitle('Specialities'),
 
         const SizedBox(height: 8),
 
@@ -349,15 +313,15 @@ class TrainerProfileScreen extends StatelessWidget {
           primary: false,
           padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: trainer.specialties.length,
+          itemCount: specialties.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
-            childAspectRatio: 2.18,
+            mainAxisExtent: 80,
           ),
           itemBuilder: (context, index) {
-            final specialty = trainer.specialties[index];
+            final specialty = specialties[index];
 
             return TrainerSpecialtyCard(
               label: specialty.name,
@@ -370,33 +334,23 @@ class TrainerProfileScreen extends StatelessWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // SESSION DETAILS
+  // HOW SESSIONS WORK
   // ---------------------------------------------------------------------------
 
-  Widget _buildSessionDetails(BuildContext context) {
-    final hasSessionDetails =
-        trainer.sessionDurationMinutes != null ||
-        trainer.sessionFormat != null ||
-        trainer.sessionLocations != null ||
-        trainer.sessionScheduleNote != null ||
-        trainer.paymentNote != null;
+  Widget _buildSessionDetails() {
+    // Sessions are fixed at 60 minutes under the current policy.
+    final format = trainer.sessionFormat?.trim();
+    final durationAndFormat = format == null || format.isEmpty
+        ? '60 minutes, one to one'
+        : '60 minutes, ${format[0].toLowerCase()}${format.substring(1)}';
 
-    if (!hasSessionDetails) {
-      return const SizedBox.shrink();
-    }
-
-    final durationAndFormat = [
-      if (trainer.sessionDurationMinutes != null) 'Up to ${trainer.sessionDurationMinutes} minutes',
-      if (trainer.sessionFormat != null) trainer.sessionFormat!,
-    ].join(', ');
+    final locations = trainer.sessionLocations?.trim() ?? '';
+    final schedule = trainer.sessionScheduleNote?.trim() ?? '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'How sessions work',
-          style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary),
-        ),
+        _sectionTitle('How sessions work'),
 
         const SizedBox(height: 8),
 
@@ -405,29 +359,20 @@ class TrainerProfileScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(GSWRadius.card),
           ),
           child: Column(
             children: [
-              if (durationAndFormat.isNotEmpty)
-                TrainerSessionDetailRow(iconPath: GSWIcons.clock, text: durationAndFormat),
+              TrainerSessionDetailRow(iconPath: GSWIcons.clock, text: durationAndFormat),
 
-              if (trainer.sessionLocations != null) ...[
+              if (locations.isNotEmpty) ...[
                 const SizedBox(height: 8),
-
-                TrainerSessionDetailRow(
-                  iconPath: GSWIcons.location,
-                  text: trainer.sessionLocations!,
-                ),
+                TrainerSessionDetailRow(iconPath: GSWIcons.location, text: locations),
               ],
 
-              if (trainer.sessionScheduleNote != null) ...[
+              if (schedule.isNotEmpty) ...[
                 const SizedBox(height: 8),
-
-                TrainerSessionDetailRow(
-                  iconPath: GSWIcons.calendar,
-                  text: trainer.sessionScheduleNote!,
-                ),
+                TrainerSessionDetailRow(iconPath: GSWIcons.calendar, text: schedule),
               ],
 
               const SizedBox(height: 8),
@@ -447,21 +392,21 @@ class TrainerProfileScreen extends StatelessWidget {
   // ABOUT
   // ---------------------------------------------------------------------------
 
-  Widget _buildAbout(BuildContext context) {
-    if (trainer.bio == null || trainer.bio!.trim().isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget? _buildAbout() {
+    final bio = trainer.bio?.trim() ?? '';
+
+    if (bio.isEmpty) return null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('About', style: GSWTextStyles.titleExtraSmall.copyWith(color: GSWColors.textPrimary)),
+        _sectionTitle('About'),
 
         const SizedBox(height: 8),
 
         Text(
-          trainer.bio!,
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
+          bio,
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
         ),
       ],
     );
@@ -469,11 +414,17 @@ class TrainerProfileScreen extends StatelessWidget {
 
   // ---------------------------------------------------------------------------
   // BOOKING FOOTER
+  // Figma: 12px top padding, price block (Bebas 26 rate, /session 12/16,
+  // total 11/15), 24px gap, 40px button, 8px, refund note 11/14.
+  // The row wraps rather than clipping on narrow screens.
   // ---------------------------------------------------------------------------
 
   Widget _buildBookingFooter(BuildContext context) {
+    final rate = _sessionRate;
+
     return Container(
-      decoration: const BoxDecoration(color: GSWColors.surfacePrimary),
+      // Figma 8.4 footer: Surface/Primary fill, no divider.
+      color: GSWColors.surfacePrimary,
       child: SafeArea(
         top: false,
         child: Padding(
@@ -483,46 +434,51 @@ class TrainerProfileScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AED ${_formatMoney(_sessionRate)}',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.headlineSmall?.copyWith(color: GSWColors.textAccent),
-                      ),
+                  if (rate != null) ...[
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          GSWMoney.aed(rate),
+                          style: GSWTextStyles.headingSmall.copyWith(
+                            color: GSWColors.textAccent,
+                            height: 1,
+                          ),
+                        ),
+                        Text(
+                          '/session',
+                          style: GSWTextStyles.bodySmall.copyWith(
+                            color: GSWColors.textSecondary,
+                            height: 16 / 12,
+                          ),
+                        ),
+                        Text(
+                          '${GSWMoney.aed(GSWMoney.totalWithFee(rate))} total',
+                          style: GSWTextStyles.bodyExtraSmall.copyWith(
+                            color: GSWColors.textSecondary,
+                            height: 15 / 11,
+                          ),
+                        ),
+                      ],
+                    ),
 
-                      Text(
-                        '/session',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
-                      ),
-
-                      const SizedBox(height: 2),
-
-                      Text(
-                        'AED ${_formatMoney(_totalPrice)} total',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: GSWColors.textSecondary),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(width: 24),
+                    const SizedBox(width: 24),
+                  ],
 
                   Expanded(
-                    child: GSWButton(
-                      size: GSWButtonSize.medium,
-                      label: 'Book a session',
-                      onPressed: () {
-                        context.push(
-                          GSWRoutes.bookingRequest,
-                          extra: BookingRequestRouteData(trainer: trainer),
-                        );
-                      },
+                    child: SizedBox(
+                      height: 40,
+                      child: GSWButton(
+                        size: GSWButtonSize.medium,
+                        label: 'Book a session',
+                        onPressed: () {
+                          context.push(
+                            GSWRoutes.bookingRequest,
+                            extra: BookingRequestRouteData(trainer: trainer),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ],
@@ -533,10 +489,10 @@ class TrainerProfileScreen extends StatelessWidget {
               Text(
                 'Session fee refunded if you cancel 24 hours or more before',
                 textAlign: TextAlign.center,
-                style:
-                    (Theme.of(context).extension<GSWTypography>()?.labelExtraSmall ??
-                            GSWTextStyles.labelExtraSmall)
-                        .copyWith(color: GSWColors.textSecondary),
+                style: GSWTextStyles.labelExtraSmall.copyWith(
+                  color: GSWColors.textSecondary,
+                  height: 14 / 11,
+                ),
               ),
             ],
           ),

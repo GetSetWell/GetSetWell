@@ -105,7 +105,17 @@ class _GetSetWellAppState extends State<GetSetWellApp> {
       return;
     }
 
-    final currentPath = gswRouter.routeInformationProvider.value.uri.path;
+    // The route information path misses pushed routes (for example the OTP
+    // screen pushed over Welcome), so read the top match of the stack.
+    String currentPath;
+    try {
+      final configuration = gswRouter.routerDelegate.currentConfiguration;
+      currentPath = configuration.isNotEmpty
+          ? configuration.last.matchedLocation
+          : configuration.uri.path;
+    } catch (_) {
+      currentPath = gswRouter.routeInformationProvider.value.uri.path;
+    }
 
     // Let the existing splash and authentication flow finish.
     const blockedRoutes = [

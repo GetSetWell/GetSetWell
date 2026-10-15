@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/routing/gsw_routes.dart';
@@ -8,7 +9,16 @@ import 'package:mobile/features/booking/data/services/booking_request_service.da
 import 'package:mobile/features/booking/domain/models/booking_success_data.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthFlowType;
 
-Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async {
+/// Sends a signed-in user on to wherever their intent points.
+///
+/// [authRoutesOnStack] is how many auth screens sit above the caller for
+/// [AuthFlowType.returnToCaller]: phone entry and code (2), plus Your details
+/// when it was pushed (3).
+Future<void> resolveAuthFlow(
+  BuildContext context,
+  AuthFlowIntent intent, {
+  int authRoutesOnStack = 2,
+}) async {
   final client = Supabase.instance.client;
 
   // ---------------------------------------------------------------------------
@@ -16,6 +26,24 @@ Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async 
   // ---------------------------------------------------------------------------
   if (intent.type == AuthFlowType.home) {
     context.go(GSWRoutes.home);
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // SIGN IN FROM A BOOKING: back to the booking
+  // ---------------------------------------------------------------------------
+  if (intent.type == AuthFlowType.returnToCaller) {
+    final navigator = Navigator.of(context);
+
+    if (!navigator.canPop()) {
+      context.go(GSWRoutes.home);
+      return;
+    }
+
+    var popped = 0;
+
+    navigator.popUntil((route) => popped++ >= authRoutesOnStack || route.isFirst);
+
     return;
   }
 
@@ -75,7 +103,9 @@ Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async 
         return;
       }
     } catch (error) {
-      debugPrint('Failed to check customer profile before concierge request: $error');
+      if (kDebugMode) {
+        debugPrint('Failed to check customer profile before concierge request: $error');
+      }
 
       if (!context.mounted) return;
 
@@ -109,8 +139,10 @@ Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async 
           language: payload.languagePreference,
         ),
       );
-    } on FunctionsHttpException catch (error) {
-      debugPrint('Concierge Edge Function failed: $error');
+    } on FunctionException catch (error) {
+      if (kDebugMode) {
+        debugPrint('Concierge Edge Function failed: $error');
+      }
 
       if (!context.mounted) {
         return;
@@ -134,7 +166,9 @@ Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async 
 
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
-      debugPrint('Failed to resolve concierge request: $error');
+      if (kDebugMode) {
+        debugPrint('Failed to resolve concierge request: $error');
+      }
 
       if (!context.mounted) {
         return;
@@ -147,7 +181,7 @@ Future<void> resolveAuthFlow(BuildContext context, AuthFlowIntent intent) async 
   }
 }
 
-bool _isProfileIncompleteError(FunctionsHttpException error) {
+bool _isProfileIncompleteError(FunctionException error) {
   if (error.status != 409) {
     return false;
   }
@@ -199,5 +233,5 @@ String? _formatBudget(int? minimum, int? maximum) {
     return null;
   }
 
-  return 'AED $minimum–$maximum';
+  return 'AED $minimum to $maximum';
 }

@@ -20,13 +20,17 @@ class TrainerSessionDetailRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SvgPicture.asset(
-          iconPath,
-          width: GSWSizes.icon,
-          height: GSWSizes.icon,
-          colorFilter: const ColorFilter.mode(
-            GSWColors.iconAccent,
-            BlendMode.srcIn,
+        // 16px icon centred on the first 20px text line (Figma 8.4).
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: SvgPicture.asset(
+            iconPath,
+            width: GSWSizes.icon,
+            height: GSWSizes.icon,
+            colorFilter: const ColorFilter.mode(
+              GSWColors.iconAccent,
+              BlendMode.srcIn,
+            ),
           ),
         ),
 
@@ -37,6 +41,7 @@ class TrainerSessionDetailRow extends StatelessWidget {
             text,
             style: GSWTextStyles.bodyMedium.copyWith(
               color: GSWColors.textSecondary,
+              height: 20 / 14,
             ),
           ),
         ),

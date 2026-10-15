@@ -1,6 +1,10 @@
 import 'package:country_picker/country_picker.dart';
-import 'package:flutter/gestures.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:mobile/features/legal/presentation/widgets/legal_agreement_text.dart';
 import 'package:phone_numbers_parser/metadata.dart';
@@ -9,6 +13,7 @@ import 'package:phone_numbers_parser/phone_numbers_parser.dart';
 import '../../../../core/theme/gsw_colors.dart';
 import '../../../../core/theme/gsw_typography.dart';
 import '../../../../core/widgets/buttons/gsw_button.dart';
+import '../../data/services/firebase_phone_verification_service.dart';
 import '../../data/services/phone_auth_service.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
@@ -16,18 +21,14 @@ class PhoneAuthScreen extends StatefulWidget {
     super.key,
     required this.onClose,
     required this.onOtpSent,
-    required this.onTermsTap,
-    required this.onPrivacyTap,
   });
 
   /// Close returns to exactly where authentication was opened from.
   final VoidCallback onClose;
 
-  /// Called after Supabase successfully sends the OTP.
-  /// Receives the complete E.164 phone number.
-  final void Function(String phone, String verificationId) onOtpSent;
-  final VoidCallback onTermsTap;
-  final VoidCallback onPrivacyTap;
+  /// Called after Firebase sends the SMS code (or verifies the number
+  /// instantly on Android). Receives the complete E.164 phone number.
+  final void Function(String phone, PhoneOtpRequest request) onOtpSent;
 
   @override
   State<PhoneAuthScreen> createState() => _PhoneAuthScreenState();
@@ -49,9 +50,6 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
   final PhoneAuthService _phoneAuthService = PhoneAuthService();
 
-  late final TapGestureRecognizer _termsRecognizer;
-  late final TapGestureRecognizer _privacyRecognizer;
-
   bool _isSending = false;
   String? _errorMessage;
 
@@ -67,10 +65,6 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
     _syncCountryField();
 
-    _termsRecognizer = TapGestureRecognizer()..onTap = widget.onTermsTap;
-
-    _privacyRecognizer = TapGestureRecognizer()..onTap = widget.onPrivacyTap;
-
     _phoneController.addListener(_handlePhoneChanged);
   }
 
@@ -83,14 +77,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     _phoneController.dispose();
     _countryController.dispose();
 
-    _termsRecognizer.dispose();
-    _privacyRecognizer.dispose();
-
     super.dispose();
   }
 
   void _syncCountryField() {
-    _countryController.text = '${_selectedCountry.flagEmoji} +${_selectedCountry.phoneCode}';
+    _countryController.text = '+${_selectedCountry.phoneCode}';
   }
 
   void _handlePhoneChanged() {
@@ -142,9 +133,11 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   }
 
   void _handlePhoneInputChanged(String value) {
+    // Spaces and dashes are accepted and dropped. A leading zero (the way
+    // UAE numbers are often written, 050...) is allowed one extra digit.
     var digits = value.replaceAll(RegExp(r'[^0-9]'), '');
 
-    final maxDigits = _maxPhoneDigits;
+    final maxDigits = _maxPhoneDigits + (digits.startsWith('0') ? 1 : 0);
 
     if (digits.length > maxDigits) {
       digits = digits.substring(0, maxDigits);
@@ -225,24 +218,24 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
     });
 
     try {
-      await _phoneAuthService.sendOtp(phone: phone);
+      final request = await _phoneAuthService.sendOtp(phone: phone);
 
       if (!mounted) return;
 
-      final verificationId = _phoneAuthService.verificationId;
-
-      if (verificationId == null || verificationId.isEmpty) {
+      if (!request.autoVerified && request.verificationId.isEmpty) {
         throw StateError('Firebase verification ID is missing.');
       }
 
-      widget.onOtpSent(phone, verificationId);
+      widget.onOtpSent(phone, request);
     } catch (error) {
-      debugPrint('Failed to send OTP: $error');
+      if (kDebugMode) {
+        debugPrint('Failed to send OTP: $error');
+      }
 
       if (!mounted) return;
 
       setState(() {
-        _errorMessage = 'We could not send the code. Please try again.';
+        _errorMessage = _sendErrorMessage(error);
       });
     } finally {
       if (mounted) {
@@ -251,6 +244,24 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         });
       }
     }
+  }
+
+  String _sendErrorMessage(Object error) {
+    if (error is FirebaseAuthException) {
+      switch (error.code) {
+        case 'invalid-phone-number':
+          return 'That number does not look right. Check it and try again.';
+
+        case 'too-many-requests':
+        case 'quota-exceeded':
+          return 'Too many codes asked for. Wait a few minutes, then try again.';
+
+        case 'network-request-failed':
+          return 'No connection. Check your internet and try again.';
+      }
+    }
+
+    return 'We could not send the code by SMS. Please try again.';
   }
 
   // ---------------------------------------------------------------------------
@@ -270,7 +281,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -284,8 +295,10 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
 
                       _buildPhoneInput(),
 
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
 
+                      // 12.5c: terms are linked here, agreement is recorded
+                      // by the checkbox on Your details.
                       const LegalAgreementText(),
                     ],
                   ),
@@ -311,10 +324,17 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       child: InkWell(
         onTap: widget.onClose,
         customBorder: const CircleBorder(),
-        child: const SizedBox(
+        child: SizedBox(
           width: 46,
           height: 46,
-          child: Center(child: Icon(Icons.close, size: 22, color: GSWColors.primary)),
+          child: Center(
+            child: SvgPicture.asset(
+              GSWIcons.close,
+              width: 12,
+              height: 12,
+              colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+            ),
+          ),
         ),
       ),
     );
@@ -329,16 +349,19 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          "WHAT'S YOUR NUMBER?",
-          style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+          "What's your number?",
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
         ),
 
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
 
         Text(
-          'We send your code on WhatsApp, then use this number '
+          'We send your code by SMS, then use this number '
           'to confirm your sessions. No password to remember.',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(
+            color: GSWColors.textSecondary,
+            height: 20 / 14,
+          ),
         ),
       ],
     );
@@ -358,7 +381,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
             behavior: HitTestBehavior.opaque,
             onTap: _showCountryPicker,
             child: SizedBox(
-              width: 120,
+              width: 96,
               child: Stack(
                 alignment: Alignment.centerRight,
                 children: [
@@ -370,7 +393,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   ),
 
                   const Positioned(
-                    right: 12,
+                    right: 8,
                     child: IgnorePointer(
                       child: Icon(
                         Icons.keyboard_arrow_down_rounded,
@@ -395,8 +418,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 ? '50 123 4567'
                 : _selectedCountry.example,
 
-            // Numeric keyboard only.
-            keyboardType: TextInputType.number,
+            // Phone keypad. Spaces and dashes are stripped on input.
+            keyboardType: TextInputType.phone,
 
             textInputAction: TextInputAction.done,
 
@@ -455,7 +478,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   surfaceTintColor: Colors.transparent,
                   clipBehavior: Clip.antiAlias,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(GSWRadius.control),
                     side: BorderSide(color: GSWColors.borderSecondary),
                   ),
                   child: SizedBox(
@@ -511,7 +534,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       child: GSWButton(
         size: GSWButtonSize.large,
         variant: _canContinue ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
-        label: _isSending ? 'Sending...' : 'Continue',
+        label: 'Continue',
+        isLoading: _isSending,
         onPressed: _canContinue ? _continue : null,
       ),
     );
@@ -604,7 +628,7 @@ class _CountryPickerDropdownState extends State<_CountryPickerDropdown> {
                         onTap: () {
                           widget.onSelected(country);
                         },
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(GSWRadius.inner),
                         child: SizedBox(
                           height: 48,
                           child: Row(

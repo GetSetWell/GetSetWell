@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile/core/constants/gsw_icons.dart';
@@ -14,7 +15,10 @@ import 'package:mobile/core/widgets/inputs/gsw_text_area.dart';
 import 'package:mobile/core/widgets/inputs/gsw_text_field.dart';
 import 'package:mobile/features/auth/domain/model/auth_flow_intent.dart';
 import 'package:mobile/features/auth/presentation/navigation/auth_flow_resolver.dart';
+import 'package:mobile/features/booking/data/services/active_concierge_match_service.dart';
 import 'package:mobile/features/booking/domain/models/concierge_match_payload.dart';
+import 'package:mobile/features/matching/presentation/widgets/concierge_ui.dart';
+import 'package:mobile/features/matching/presentation/widgets/open_request_limit_sheet.dart';
 import 'package:mobile/features/trainers/data/repositories/trainer_repository.dart';
 import 'package:mobile/features/trainers/domain/models/training_location.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,8 +33,6 @@ class HelpMeChooseScreen extends StatefulWidget {
 }
 
 class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
-  static const _interactiveSurface = Color(0xFF2E3944);
-
   int _currentStep = 1;
   bool _showFemaleOnly = false;
   bool _isSubmitting = false;
@@ -140,6 +142,15 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
     }
   }
 
+  void _retryLoadOptions() {
+    setState(() {
+      _goalOptionsLoadFailed = false;
+      _isLoading = true;
+    });
+
+    _loadOptions();
+  }
+
   // ---------------------------------------------------------------------------
   // BACKEND-DERIVED OPTIONS
   // ---------------------------------------------------------------------------
@@ -216,9 +227,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   // ---------------------------------------------------------------------------
 
   void _closeFlow() {
-    // Because Help Me Choose must always be opened using push(),
-    // pop() returns to the exact place from which it was opened.
-    context.pop();
+    // Help me choose is normally pushed, but it can be reached with go()
+    // (deep link, auth redirect), so never pop an empty stack.
+    conciergeSafePop(context);
   }
 
   void _goBack() {
@@ -251,7 +262,11 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
         preferredTime: _selectedTime!,
         trainingLocationId: _selectedLocation!.id,
         trainingLocationName: _locationLabel(_selectedLocation!),
-        preferredArea: _preferredAreaController.text.trim(),
+        // The server accepts up to 100 characters for the area.
+        preferredArea: () {
+          final area = _preferredAreaController.text.trim();
+          return area.length > 100 ? area.substring(0, 100).trim() : area;
+        }(),
         budgetMin: _selectedBudgetMin,
         budgetMax: _selectedBudgetMax,
         femaleTrainerOnly: _showFemaleOnly,
@@ -271,6 +286,12 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       }
 
       if (user != null) {
+        // One open Help me choose request at a time (DB rule). Check before
+        // submitting so a signed-in customer sees 9.3 instead of an error.
+        final canSubmit = await _checkNoOpenRequest();
+
+        if (!canSubmit || !mounted) return;
+
         await resolveAuthFlow(context, intent);
         return;
       }
@@ -286,6 +307,32 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       }
     }
   }
+
+  /// Returns true when there is no open concierge request. Otherwise shows
+  /// Figma 9.3 "You already have an open request" and returns false.
+  Future<bool> _checkNoOpenRequest() async {
+    try {
+      final active = await ActiveConciergeMatchService(Supabase.instance.client).getCurrent();
+
+      if (active == null) return true;
+      if (!mounted) return false;
+
+      final seeRequests = await OpenRequestLimitSheet.show(context, active);
+
+      if (!mounted) return false;
+
+      if (seeRequests) {
+        context.go(GSWRoutes.sessions, extra: 0);
+      }
+
+      return false;
+    } catch (error) {
+      // The server still enforces the limit; let the submit path report it.
+      debugPrint('Active concierge request check failed: $error');
+      return true;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // VALIDATION
   // ---------------------------------------------------------------------------
@@ -349,8 +396,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       child: Row(
         children: [
           Material(
-            color: Colors.transparent,
-            shape: CircleBorder(side: BorderSide(color: GSWColors.borderSecondary)),
+            // Figma: black/40 fill with border/secondary ring.
+            color: GSWColors.backgroundOverlay,
+            shape: const CircleBorder(side: BorderSide(color: GSWColors.borderSecondary)),
             child: InkWell(
               onTap: _closeFlow,
               customBorder: const CircleBorder(),
@@ -373,11 +421,11 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
           Expanded(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(GSWRadius.full),
               child: LinearProgressIndicator(
                 value: _currentStep / 4,
                 minHeight: 8,
-                backgroundColor: _interactiveSurface,
+                backgroundColor: GSWColors.surfaceInteractive,
                 valueColor: const AlwaysStoppedAnimation<Color>(GSWColors.primary),
               ),
             ),
@@ -387,7 +435,10 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
           Text(
             '$_currentStep of 4',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+              height: 20 / 14,
+            ),
           ),
         ],
       ),
@@ -413,7 +464,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       children: [
         Text(
           'What is your goal?',
-          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
         ),
 
         const SizedBox(height: 24),
@@ -449,14 +500,14 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       children: [
         Text(
           'When can you train?',
-          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
         ),
 
         const SizedBox(height: 24),
 
         Text(
           'Days that work',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
         ),
 
         const SizedBox(height: 8),
@@ -467,22 +518,19 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
         Text(
           'Time of day',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
         ),
 
         const SizedBox(height: 8),
 
-        Row(
+        // Figma 2.2: hug-width pills, 24px sides, 8px gap, wrapping.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            Expanded(child: _buildTimeOption('Morning')),
-
-            const SizedBox(width: 8),
-
-            Expanded(child: _buildTimeOption('Afternoon')),
-
-            const SizedBox(width: 8),
-
-            Expanded(child: _buildTimeOption('Evening')),
+            _buildTimeOption('Morning'),
+            _buildTimeOption('Afternoon'),
+            _buildTimeOption('Evening'),
           ],
         ),
       ],
@@ -509,7 +557,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
         return Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(GSWRadius.full),
             onTap: () {
               setState(() {
                 if (selected) {
@@ -537,6 +585,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                 entry.value,
                 style: GSWTextStyles.labelLarge.copyWith(
                   color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                  height: 1,
                 ),
               ),
             ),
@@ -557,27 +606,31 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
             _selectedTime = label;
           });
         },
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
-          width: double.infinity,
           height: 40,
-          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           decoration: BoxDecoration(
             color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(GSWRadius.full),
             border: Border.all(
               width: 1,
               color: isSelected ? GSWColors.primary : GSWColors.borderSecondary,
             ),
           ),
-          child: Text(
-            label,
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.labelLarge.copyWith(
-              color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+          // widthFactor 1 keeps the pill hugging its label inside the Wrap.
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              style: GSWTextStyles.labelLarge.copyWith(
+                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+                height: 1,
+              ),
             ),
           ),
         ),
@@ -593,33 +646,53 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       children: [
         Text(
           'Where, and what is your budget?',
-          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
         ),
 
         const SizedBox(height: 24),
 
-        Text('Where', style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary)),
+        if (_goalOptionsLoadFailed) ...[
+          Text(
+            "We couldn't load the locations and prices. Check your connection and try again.",
+            style: GSWTextStyles.bodyMedium.copyWith(
+              color: GSWColors.textSecondary,
+              height: 20 / 14,
+            ),
+          ),
+          const SizedBox(height: 16),
+          GSWButton(
+            size: GSWButtonSize.medium,
+            variant: GSWButtonVariant.secondary,
+            label: 'Try again',
+            onPressed: _retryLoadOptions,
+          ),
+        ] else ...[
+          Text(
+            'Where',
+            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 20 / 14),
+          ),
 
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
 
-        _buildWhereOptions(),
+          _buildWhereOptions(),
 
-        const SizedBox(height: 24),
+          const SizedBox(height: 24),
 
-        GSWTextField(
-          size: GSWTextFieldSize.large,
-          controller: _preferredAreaController,
-          label: 'Preferred area',
-          hintText: 'e.g. Dubai Marina ',
-          textInputAction: TextInputAction.done,
-          onChanged: (_) {
-            setState(() {});
-          },
-        ),
+          GSWTextField(
+            size: GSWTextFieldSize.large,
+            controller: _preferredAreaController,
+            label: 'Preferred area',
+            hintText: 'e.g. Dubai Marina',
+            textInputAction: TextInputAction.done,
+            onChanged: (_) {
+              setState(() {});
+            },
+          ),
 
-        const SizedBox(height: 24),
+          const SizedBox(height: 24),
 
-        _buildBudgetSection(),
+          _buildBudgetSection(),
+        ],
       ],
     );
   }
@@ -637,14 +710,11 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       return (order[aLabel] ?? 99).compareTo(order[bLabel] ?? 99);
     });
 
-    return Row(
-      children: [
-        for (int index = 0; index < locations.length; index++) ...[
-          Expanded(child: _buildWhereOption(locations[index])),
-
-          if (index < locations.length - 1) const SizedBox(width: 8),
-        ],
-      ],
+    // Figma 2.3: hug-width pills, 24px sides, 8px gap, wrapping.
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [for (final location in locations) _buildWhereOption(location)],
     );
   }
 
@@ -659,27 +729,31 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
             _selectedLocation = location;
           });
         },
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
-          width: double.infinity,
           height: 40,
-          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFDAE64B) : const Color(0xFF1A2532),
-            borderRadius: BorderRadius.circular(999),
+            color: isSelected ? GSWColors.primary : GSWColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
             border: Border.all(
               width: 1,
-              color: isSelected ? const Color(0xFFDAE64B) : const Color(0xFF586169),
+              color: isSelected ? GSWColors.primary : GSWColors.borderSecondary,
             ),
           ),
-          child: Text(
-            _locationLabel(location),
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            style: GSWTextStyles.labelLarge.copyWith(
-              color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+          // widthFactor 1 keeps the pill hugging its label inside the Wrap.
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              _locationLabel(location),
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              style: GSWTextStyles.labelLarge.copyWith(
+                color: isSelected ? GSWColors.textInverse : GSWColors.textPrimary,
+                height: 1,
+              ),
             ),
           ),
         ),
@@ -696,7 +770,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
         children: [
           Text(
             'Budget per session',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+            style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
           ),
 
           const SizedBox(height: 12),
@@ -722,17 +796,17 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       children: [
         Text(
           'Budget per session',
-          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
         ),
 
         const SizedBox(height: 12),
 
         Text(
           selectedMin == selectedMax ? 'AED $selectedMin' : 'AED $selectedMin to AED $selectedMax',
-          style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.bodyLarge.copyWith(color: GSWColors.textPrimary, height: 1),
         ),
 
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
 
         if (absoluteMin == absoluteMax)
           SizedBox(
@@ -743,21 +817,21 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                 height: 4,
                 decoration: BoxDecoration(
                   color: GSWColors.primary,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(GSWRadius.full),
                 ),
               ),
             ),
           )
         else
           SizedBox(
-            height: 32,
+            height: 24,
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 4,
 
                 activeTrackColor: GSWColors.primary,
 
-                inactiveTrackColor: const Color(0xFF2E3944),
+                inactiveTrackColor: GSWColors.surfaceInteractive,
 
                 thumbColor: GSWColors.primary,
 
@@ -799,11 +873,11 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
             ),
           ),
 
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
 
         Text(
           "This is the trainer's session rate. A 5% service fee is added at checkout.",
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 16 / 12),
         ),
       ],
     );
@@ -818,12 +892,15 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       children: [
         Text(
           'Anything else we should know?',
-          style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary, height: 30 / 24),
         ),
 
         const SizedBox(height: 24),
 
-        Text('Trainer', style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary)),
+        Text(
+          'Trainer',
+          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
+        ),
 
         const SizedBox(height: 12),
 
@@ -831,7 +908,10 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
         const SizedBox(height: 24),
 
-        Text('Language', style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary)),
+        Text(
+          'Language',
+          style: GSWTextStyles.labelMedium.copyWith(color: GSWColors.textSecondary, height: 1),
+        ),
 
         const SizedBox(height: 12),
 
@@ -839,8 +919,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
 
         const SizedBox(height: 24),
 
+        // Figma 2.4 uses "Text Area Small": 80px minimum height.
         GSWTextArea(
-          size: GSWTextAreaSize.large,
+          size: GSWTextAreaSize.medium,
           controller: _notesController,
           hintText: 'Tell us anything that would help us pick the right person...',
           helpingText: 'A real person reads this.',
@@ -853,9 +934,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
         const SizedBox(height: 24),
 
         Text(
-          'Please do not put detailed medical information here. '
-          'Your trainer will do a health screening before your first session.',
-          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary),
+          "Please don't include health details here. "
+          "If there's something your trainer should know, you can tell them directly.",
+          style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textSecondary, height: 16 / 12),
         ),
       ],
     );
@@ -864,19 +945,20 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   Widget _buildFemaleOnlyToggle(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 44,
-      padding: const EdgeInsets.only(left: 12, right: 12),
+      // Figma 2.4: 12px sides, 8px top and bottom around the 24px toggle.
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: GSWColors.backgroundSecondary,
         border: Border.all(color: GSWColors.borderSecondary),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(GSWRadius.control),
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               'Show female trainers only',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: GSWColors.textPrimary),
+              style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.textPrimary, height: 16 / 12),
             ),
           ),
 
@@ -894,44 +976,35 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   }
 
   Future<void> _askForMatchNotifications() async {
-    final messaging = FirebaseMessaging.instance;
+    try {
+      await _askForMatchNotificationsUnsafe();
+    } catch (error) {
+      // Push is optional. Never let a Firebase error break the flow.
+      debugPrint('Match notification prompt failed: $error');
+    }
+  }
 
-    final currentSettings = await messaging.getNotificationSettings();
+  Future<void> _askForMatchNotificationsUnsafe() async {
+    final pushService = PushNotificationService();
 
-    if (currentSettings.authorizationStatus != AuthorizationStatus.notDetermined) {
+    if (!await pushService.shouldRequestPermission()) {
       return;
     }
 
     if (!mounted) return;
 
-    final shouldEnable = await showModalBottomSheet<bool>(
+    final shouldEnable = await showConciergeSheet<bool>(
       context: context,
-      backgroundColor: GSWColors.backgroundSecondary,
-      isScrollControlled: true,
       builder: (sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+        return ConciergeSheet(
+          children: [
+            const ConciergeSheetHeading(
+              title: 'Know when your match is ready',
+              intro: "We'll let you know as soon as we've picked a trainer for your request.",
+            ),
+            Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Know when your match is ready',
-                  style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
-                ),
-
-                const SizedBox(height: 12),
-
-                Text(
-                  'We’ll notify you when we’ve found a trainer '
-                  'that fits your request.',
-                  style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-                ),
-
-                const SizedBox(height: 24),
-
                 GSWButton(
                   size: GSWButtonSize.large,
                   variant: GSWButtonVariant.primary,
@@ -940,12 +1013,10 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                     Navigator.of(sheetContext).pop(true);
                   },
                 ),
-
-                const SizedBox(height: 8),
-
+                const SizedBox(height: 20),
                 GSWButton(
                   size: GSWButtonSize.large,
-                  variant: GSWButtonVariant.secondary,
+                  variant: GSWButtonVariant.tertiary,
                   label: 'Not now',
                   onPressed: () {
                     Navigator.of(sheetContext).pop(false);
@@ -953,21 +1024,21 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                 ),
               ],
             ),
-          ),
+          ],
         );
       },
     );
 
     if (shouldEnable != true) return;
 
-    final settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
+    final settings = await pushService.requestPermission();
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized ||
         settings.authorizationStatus == AuthorizationStatus.provisional) {
       final user = FirebaseAuth.instance.currentUser;
 
       if (user != null) {
-        await PushNotificationService().registerCurrentDevice();
+        await pushService.registerCurrentDevice();
       }
     }
   }
@@ -1021,18 +1092,18 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFFDAE64B) : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
+            color: selected ? GSWColors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
             border: Border.all(
               width: 1,
-              color: selected ? const Color(0xFFDAE64B) : const Color(0xFF2E3944),
+              color: selected ? GSWColors.primary : GSWColors.surfaceInteractive,
             ),
           ),
           child: Row(
@@ -1044,6 +1115,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
                 maxLines: 1,
                 style: GSWTextStyles.bodyMedium.copyWith(
                   color: selected ? GSWColors.textInverse : GSWColors.textPrimary,
+                  height: 20 / 14,
                 ),
               ),
             ],
@@ -1075,9 +1147,9 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
   }) {
     return Material(
       color: selected ? GSWColors.primary : GSWColors.surfaceElevated,
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(GSWRadius.full),
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
@@ -1086,7 +1158,7 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
           alignment: Alignment.centerLeft,
           padding: const EdgeInsets.symmetric(horizontal: 24),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(GSWRadius.full),
             border: Border.all(color: selected ? GSWColors.primary : GSWColors.borderSecondary),
           ),
           child: Text(
@@ -1110,8 +1182,8 @@ class _HelpMeChooseScreenState extends State<HelpMeChooseScreen> {
       decoration: const BoxDecoration(
         color: GSWColors.backgroundSecondary,
         borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(16),
-          topRight: Radius.circular(16),
+          topLeft: Radius.circular(GSWRadius.card),
+          topRight: Radius.circular(GSWRadius.card),
         ),
       ),
       child: SafeArea(

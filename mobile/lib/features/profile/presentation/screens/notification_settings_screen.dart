@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
-import 'package:mobile/core/widgets/buttons/gsw_toggle.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// 12.3 Notifications (Figma 819:3571).
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
 
@@ -34,24 +37,27 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
           behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
           child: SingleChildScrollView(
             physics: const ClampingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildBackButton(context),
 
-                const SizedBox(height: 40),
+                const SizedBox(height: 24),
 
                 Text(
                   'Notification settings',
-                  style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+                  style: GSWTextStyles.titleLarge.copyWith(
+                    height: 30 / 24,
+                    color: GSWColors.textPrimary,
+                  ),
                 ),
                 if (_isLoading) ...[
                   const SizedBox(height: 48),
 
                   const Center(child: CircularProgressIndicator(color: GSWColors.primary)),
                 ] else ...[
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 24),
 
                   _buildPushCard(),
 
@@ -69,9 +75,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<bool> _savePreference(String column, bool value) async {
     final client = Supabase.instance.client;
-    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
     try {
+      final customerId = await CustomerIdentityService(client: client).getCustomerId();
+
       await client.from('notification_preferences').upsert({
         'user_id': customerId,
         column: value,
@@ -91,16 +98,21 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       color: Colors.transparent,
       child: InkWell(
         onTap: () => Navigator.of(context).pop(),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(GSWRadius.full),
         child: Container(
-          width: 48,
-          height: 48,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: GSWColors.borderSecondary),
           ),
           alignment: Alignment.center,
-          child: const Icon(Icons.chevron_left, color: GSWColors.primary, size: 30),
+          child: SvgPicture.asset(
+            GSWIcons.arrowheadLeft,
+            width: 30,
+            height: 30,
+            colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+          ),
         ),
       ),
     );
@@ -108,9 +120,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _loadPreferences() async {
     final client = Supabase.instance.client;
-    final customerId = await CustomerIdentityService(client: client).getCustomerId();
 
     try {
+      final customerId = await CustomerIdentityService(client: client).getCustomerId();
+
       final preferences = await client
           .from('notification_preferences')
           .select('trainer_matches, booking_updates, session_reminders, new_trainers')
@@ -147,12 +160,15 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Push', style: GSWTextStyles.titleMedium.copyWith(color: GSWColors.textPrimary)),
+          Text(
+            'Push',
+            style: GSWTextStyles.titleExtraSmall.copyWith(height: 1, color: GSWColors.textPrimary),
+          ),
 
           const SizedBox(height: 12),
 
@@ -180,7 +196,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
             },
           ),
 
-          _divider(),
+          const SizedBox(height: 12),
 
           _buildToggleRow(
             label: 'Booking updates',
@@ -206,7 +222,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
             },
           ),
 
-          _divider(),
+          const SizedBox(height: 12),
 
           _buildToggleRow(
             label: 'Session reminders',
@@ -232,7 +248,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
             },
           ),
 
-          _divider(),
+          const SizedBox(height: 12),
 
           _buildToggleRow(
             label: 'New trainers in Dubai',
@@ -267,20 +283,23 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    return SizedBox(
-      height: 64,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         children: [
           Expanded(
             child: Text(
               label,
-              style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textPrimary),
+              style: GSWTextStyles.bodyMedium.copyWith(
+                height: 20 / 14,
+                color: GSWColors.textPrimary,
+              ),
             ),
           ),
 
           const SizedBox(width: 16),
 
-          GSWToggle(value: value, onChanged: onChanged),
+          _NotificationToggle(value: value, onChanged: onChanged),
         ],
       ),
     );
@@ -292,12 +311,15 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: GSWColors.surfacePrimary,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('WhatsApp', style: GSWTextStyles.titleMedium.copyWith(color: GSWColors.textPrimary)),
+          Text(
+            'WhatsApp',
+            style: GSWTextStyles.labelLarge.copyWith(height: 20 / 16, color: GSWColors.textPrimary),
+          ),
 
           const SizedBox(height: 12),
 
@@ -305,14 +327,58 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
             'Booking confirmations and session reminders are always sent '
             'on WhatsApp. We use it to confirm your sessions, so it cannot '
             'be switched off.',
-            style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary, height: 1.5),
+            style: GSWTextStyles.bodyMedium.copyWith(
+              fontSize: 13,
+              height: 18 / 13,
+              color: GSWColors.textSecondary,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _divider() {
-    return const Divider(height: 1, color: GSWColors.neutral700);
+}
+
+/// 44x26 switch from Figma 819:3571. The shared GSWToggle is 40x24, so this
+/// screen keeps its own at the design size (same colours as GSWToggle).
+class _NotificationToggle extends StatelessWidget {
+  const _NotificationToggle({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      toggled: value,
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onChanged(!value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 44,
+          height: 26,
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: value ? GSWColors.primary : GSWColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(GSWRadius.full),
+          ),
+          child: AnimatedAlign(
+            duration: const Duration(milliseconds: 180),
+            alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: value ? GSWColors.surfacePrimary : GSWColors.neutral400,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

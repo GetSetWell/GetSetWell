@@ -2,9 +2,14 @@ import 'dart:async';
 
 import 'package:country_picker/country_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:mobile/core/widgets/sheets/gsw_sheet_drag_dismiss.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/constants/gsw_icons.dart';
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
@@ -14,6 +19,9 @@ import 'package:phone_numbers_parser/metadata.dart';
 import 'package:phone_numbers_parser/phone_numbers_parser.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// 12.2d Change number, new number (Figma 1263:4223) and
+/// 12.2e Change number, enter the code (Figma 1263:4318).
+/// Codes go by SMS (Firebase Phone Auth), never WhatsApp.
 class ChangePhoneScreen extends StatefulWidget {
   const ChangePhoneScreen({super.key, required this.currentPhone});
 
@@ -37,6 +45,11 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
   Timer? _resendTimer;
 
   int _resendSeconds = 30;
+
+  /// Mirrors [_resendSeconds] so the "Didn't get the code?" sheet can count down.
+  final ValueNotifier<int> _resendNotifier = ValueNotifier<int>(30);
+
+  late final TapGestureRecognizer _changeNumberRecognizer;
 
   bool _isResending = false;
 
@@ -81,6 +94,17 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
     _syncCountryField();
 
     _phoneController.addListener(_handlePhoneChanged);
+
+    _otpFocusNode.addListener(_handleOtpFocusChanged);
+
+    _changeNumberRecognizer = TapGestureRecognizer()
+      ..onTap = () {
+        if (!_isSubmitting) _changeNumberAgain();
+      };
+  }
+
+  void _handleOtpFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -95,7 +119,13 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
 
     _otpController.dispose();
 
+    _otpFocusNode.removeListener(_handleOtpFocusChanged);
+
     _otpFocusNode.dispose();
+
+    _changeNumberRecognizer.dispose();
+
+    _resendNotifier.dispose();
 
     _resendTimer?.cancel();
 
@@ -171,6 +201,7 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
             _resendSeconds = 30;
             _error = null;
           });
+          _resendNotifier.value = 30;
           _startResendTimer();
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (isCurrentRequest()) _otpFocusNode.requestFocus();
@@ -304,6 +335,7 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
       _isResending = false;
       _isSubmitting = false;
     });
+    _resendNotifier.value = 30;
   }
 
   void _startResendTimer() {
@@ -316,9 +348,11 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
       if (_resendSeconds <= 1) {
         timer.cancel();
         setState(() => _resendSeconds = 0);
+        _resendNotifier.value = 0;
         return;
       }
       setState(() => _resendSeconds--);
+      _resendNotifier.value = _resendSeconds;
     });
   }
 
@@ -452,17 +486,21 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
 
     final digit = hasDigit ? code[index] : '';
 
-    final hasError = _error != null;
+    final hasError = _error != null && code.length == 6;
 
-    final borderColor = hasError
-        ? GSWColors.error
-        : hasDigit
-        ? GSWColors.primary
-        : GSWColors.surfaceInteractive;
+    final activeIndex = code.length >= 6 ? 5 : code.length;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 10),
+    final isActive = _otpFocusNode.hasFocus && index == activeIndex && code.length < 6;
 
+    // Filled and empty boxes have no border; only the active box (focused)
+    // or a wrong full code (error) shows one (Figma 1263:4342).
+    final Color? borderColor = hasError
+        ? GSWColors.borderError
+        : isActive
+        ? GSWColors.borderFocused
+        : null;
+
+    return Container(
       height: 64,
 
       alignment: Alignment.center,
@@ -470,51 +508,147 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
       decoration: BoxDecoration(
         color: GSWColors.surfaceInteractive,
 
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(GSWRadius.control),
 
-        border: Border.all(width: 1.5, color: borderColor),
+        border: borderColor == null ? null : Border.all(width: 1.5, color: borderColor),
       ),
 
       child: Text(
         digit,
 
-        style: GSWTextStyles.titleMedium.copyWith(
-          color: hasError ? GSWColors.error : GSWColors.textPrimary,
-        ),
+        style: GSWTextStyles.titleLarge.copyWith(height: 1, color: GSWColors.textPrimary),
       ),
     );
+  }
+
+  TextStyle get _smallStyle =>
+      GSWTextStyles.bodySmall.copyWith(height: 16 / 12, color: GSWColors.textTertiary);
+
+  Widget _centredLine(String text, {Color? color, VoidCallback? onTap}) {
+    final line = SizedBox(
+      width: double.infinity,
+
+      child: Text(text, textAlign: TextAlign.center, style: _smallStyle.copyWith(color: color)),
+    );
+
+    if (onTap == null) return line;
+
+    return GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: line);
   }
 
   Widget _buildResend() {
     final canResend = _resendSeconds == 0 && !_isResending;
 
-    final label = _isResending
-        ? 'Sending...'
-        : canResend
-        ? 'Resend code'
-        : 'Resend code in 0:${_resendSeconds.toString().padLeft(2, '0')}';
+    if (_isResending) return _centredLine('Sending a new code...');
 
-    return SizedBox(
-      width: double.infinity,
+    if (canResend) {
+      return _centredLine('Resend code', color: GSWColors.textAccent, onTap: _resendCode);
+    }
 
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+    return _centredLine('Resend code in 0:${_resendSeconds.toString().padLeft(2, '0')}');
+  }
 
-        onTap: canResend ? _resendCode : null,
+  /// "Didn't get the code?" (SMS version of Figma "Not on WhatsApp?").
+  void _showCodeHelpSheet() {
+    FocusScope.of(context).unfocus();
 
-        child: Text(
-          label,
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: GSWColors.scrim,
+      enableDrag: false,
+      builder: (_) => GSWSheetDragDismiss(
+        child: Builder(builder: (sheetContext) {
+        final bottomInset = MediaQuery.paddingOf(sheetContext).bottom;
 
-          textAlign: TextAlign.center,
-
-          style: GSWTextStyles.bodySmall.copyWith(
-            fontSize: 12,
-
-            height: 16 / 12,
-
-            color: canResend ? GSWColors.primary : GSWColors.textTertiary,
+        return Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            color: GSWColors.backgroundPrimary,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(GSWRadius.sheet)),
           ),
-        ),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 28 + bottomInset),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 28,
+                  child: Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: GSWColors.surfaceInteractive,
+                        borderRadius: BorderRadius.circular(GSWRadius.full),
+                      ),
+                    ),
+                  ),
+                ),
+
+                Text(
+                  "Didn't get the code?",
+                  style: GSWTextStyles.titleLarge.copyWith(height: 1, color: GSWColors.textPrimary),
+                ),
+
+                const SizedBox(height: 8),
+
+                Text(
+                  'We sent it by SMS to ${_formatPhone(_pendingPhone ?? '')}. Codes usually '
+                  'arrive within a minute. Signal and some message filters can slow them down.',
+                  style: GSWTextStyles.bodyMedium.copyWith(
+                    height: 20 / 14,
+                    color: GSWColors.textSecondary,
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                ValueListenableBuilder<int>(
+                  valueListenable: _resendNotifier,
+                  builder: (context, seconds, _) {
+                    final canResend = seconds == 0 && !_isResending;
+
+                    return GSWButton(
+                      label: canResend
+                          ? 'Send a new code'
+                          : 'Send a new code in 0:${seconds.toString().padLeft(2, '0')}',
+                      variant: canResend ? GSWButtonVariant.primary : GSWButtonVariant.disabled,
+                      onPressed: canResend
+                          ? () {
+                              Navigator.of(sheetContext).pop();
+                              _resendCode();
+                            }
+                          : null,
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 20),
+
+                GSWButton(
+                  label: 'Use a different number',
+                  variant: GSWButtonVariant.secondary,
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                    _changeNumberAgain();
+                  },
+                ),
+
+                const SizedBox(height: 20),
+
+                GSWButton(
+                  label: 'Close',
+                  variant: GSWButtonVariant.tertiary,
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
       ),
     );
   }
@@ -534,98 +668,97 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
                 child: SingleChildScrollView(
                   physics: const ClampingScrollPhysics(),
 
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
 
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
 
                     children: [
-                      _buildBackButton(),
+                      _otpSent ? _buildBackButton() : _buildCloseButton(),
 
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
 
                       Text(
-                        _otpSent ? 'CHECK YOUR MESSAGES' : "What's your new number?",
+                        _otpSent ? 'Check your messages' : "What's your new number?",
 
-                        style: _otpSent
-                            ? GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary)
-                            : GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
+                        style: GSWTextStyles.titleLarge.copyWith(
+                          height: _otpSent ? 1 : 30 / 24,
+                          color: GSWColors.textPrimary,
+                        ),
                       ),
 
                       const SizedBox(height: 8),
 
                       if (_otpSent)
-                        Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-
-                          children: [
-                            Text(
-                              'We sent a 6-digit SMS code to ${_formatPhone(_pendingPhone ?? '')}. ',
-
-                              style: GSWTextStyles.bodyMedium.copyWith(
-                                color: GSWColors.textSecondary,
+                        Text.rich(
+                          TextSpan(
+                            text:
+                                'We sent a 6 digit code by SMS to ${_formatPhone(_pendingPhone ?? '')}. ',
+                            children: [
+                              TextSpan(
+                                text: 'Change number',
+                                style: const TextStyle(color: GSWColors.textAccent),
+                                recognizer: _changeNumberRecognizer,
                               ),
-                            ),
+                            ],
+                          ),
 
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-
-                              onTap: _isSubmitting ? null : _changeNumberAgain,
-
-                              child: Text(
-                                'Change number',
-
-                                style: GSWTextStyles.bodyMedium.copyWith(
-                                  color: GSWColors.textAccent,
-                                ),
-                              ),
-                            ),
-                          ],
+                          style: GSWTextStyles.bodyMedium.copyWith(
+                            height: 20 / 14,
+                            color: GSWColors.textSecondary,
+                          ),
                         )
                       else
                         Text(
-                          'We\'ll send a verification code by SMS.',
+                          widget.currentPhone.trim().isEmpty
+                              ? "We'll send a code to it by SMS. Your current number stays "
+                                    'on your account until you enter that code.'
+                              : "We'll send a code to it by SMS. "
+                                    '${_formatPhone(widget.currentPhone)} stays on your account '
+                                    'until you enter that code.',
 
-                          style: GSWTextStyles.bodyLarge.copyWith(
+                          style: GSWTextStyles.bodyMedium.copyWith(
+                            height: 20 / 14,
                             color: GSWColors.textSecondary,
-
-                            height: 1.45,
                           ),
                         ),
 
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
 
                       if (!_otpSent) ...[
-                        Text(
-                          'New mobile number',
-
-                          style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-                        ),
-
-                        const SizedBox(height: 8),
-
                         _buildPhoneInput(),
+
+                        const SizedBox(height: 12),
+
+                        Text(
+                          'Your sessions, requests and receipts stay with your account.',
+
+                          style: GSWTextStyles.bodySmall.copyWith(
+                            height: 16 / 12,
+                            color: GSWColors.textSecondary,
+                          ),
+                        ),
                       ] else ...[
                         _buildOtpEntry(),
 
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 24),
+
+                        // On the number step the field shows the error itself
+                        // (errorText), so it is only shown here on the code step.
+                        if (_error != null) ...[
+                          _centredLine(_error!, color: GSWColors.error),
+
+                          const SizedBox(height: 24),
+                        ],
 
                         _buildResend(),
-                      ],
 
-                      if (_error != null) ...[
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 24),
 
-                        SizedBox(
-                          width: double.infinity,
-
-                          child: Text(
-                            _error!,
-
-                            textAlign: TextAlign.center,
-
-                            style: GSWTextStyles.bodySmall.copyWith(color: GSWColors.error),
-                          ),
+                        _centredLine(
+                          "Didn't get the code?",
+                          color: GSWColors.textAccent,
+                          onTap: _isSubmitting ? null : _showCodeHelpSheet,
                         ),
                       ],
                     ],
@@ -638,30 +771,18 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
 
-                child: SizedBox(
-                  width: double.infinity,
-
-                  child: Text(
-                    'Enter the code from your SMS if it does not fill in automatically.',
-
-                    textAlign: TextAlign.center,
-
-                    style: GSWTextStyles.bodySmall.copyWith(
-                      fontSize: 12,
-
-                      height: 16 / 12,
-
-                      color: GSWColors.textTertiary,
-                    ),
-                  ),
+                child: _centredLine(
+                  _isSubmitting
+                      ? 'Checking your code...'
+                      : 'The code fills in on its own once it arrives.',
                 ),
               )
             else
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
 
                 child: GSWButton(
-                  label: 'Send verification code',
+                  label: 'Send code',
 
                   onPressed: _isSubmitting
                       ? null
@@ -684,34 +805,66 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
     );
   }
 
-  Widget _buildBackButton() {
-    return Material(
-      color: Colors.transparent,
+  Widget _circleButton({required Widget icon, required VoidCallback? onTap, required String label}) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
 
-      child: InkWell(
-        onTap: () {
-          if (context.canPop()) {
-            context.pop(false);
-          }
-        },
+        child: InkWell(
+          onTap: onTap,
 
-        customBorder: const CircleBorder(),
+          customBorder: const CircleBorder(),
 
-        child: Container(
-          width: 48,
+          child: Container(
+            width: 46,
 
-          height: 48,
+            height: 46,
 
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
 
-            border: Border.all(color: GSWColors.borderSecondary),
+              border: Border.all(color: GSWColors.borderSecondary),
+            ),
+
+            alignment: Alignment.center,
+
+            child: icon,
           ),
-
-          alignment: Alignment.center,
-
-          child: const Icon(Icons.chevron_left_rounded, color: GSWColors.primary, size: 30),
         ),
+      ),
+    );
+  }
+
+  /// 12.2d: the number step closes the flow (X).
+  Widget _buildCloseButton() {
+    return _circleButton(
+      label: 'Close',
+      onTap: () {
+        if (context.canPop()) {
+          context.pop(false);
+        }
+      },
+      icon: SvgPicture.asset(
+        GSWIcons.close,
+        width: 12,
+        height: 12,
+        colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
+      ),
+    );
+  }
+
+  /// 12.2e: back from the code step returns to the number step.
+  Widget _buildBackButton() {
+    return _circleButton(
+      label: 'Back',
+      onTap: _isSubmitting ? null : _changeNumberAgain,
+      icon: SvgPicture.asset(
+        GSWIcons.arrowheadLeft,
+        width: 30,
+        height: 30,
+        colorFilter: const ColorFilter.mode(GSWColors.iconAccent, BlendMode.srcIn),
       ),
     );
   }
@@ -941,7 +1094,7 @@ class _ChangePhoneScreenState extends State<ChangePhoneScreen> {
                   clipBehavior: Clip.antiAlias,
 
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(GSWRadius.control),
 
                     side: BorderSide(color: GSWColors.borderSecondary),
                   ),
@@ -1114,7 +1267,7 @@ class _CountryPickerDropdownState extends State<_CountryPickerDropdown> {
                       return InkWell(
                         onTap: () => widget.onSelected(country),
 
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(GSWRadius.inner),
 
                         child: SizedBox(
                           height: 48,

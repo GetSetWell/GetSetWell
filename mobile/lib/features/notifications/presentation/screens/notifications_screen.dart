@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,8 @@ import 'package:mobile/core/routing/gsw_routes.dart';
 import 'package:mobile/core/services/customer_identity_service.dart';
 import 'package:mobile/core/theme/gsw_colors.dart';
 import 'package:mobile/core/theme/gsw_typography.dart';
+import 'package:mobile/core/utils/gsw_format.dart';
+import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -48,11 +51,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     setState(() {
       _notificationsFuture = future;
     });
-    await future;
+    try {
+      await future;
+    } catch (_) {
+      // The FutureBuilder shows the error state.
+    }
   }
 
+  bool _isOpening = false;
+
   Future<void> _openNotification(Map<String, dynamic> notification) async {
-    final customerId = await CustomerIdentityService(client: _client).getCustomerId();
+    if (_isOpening) return;
+    _isOpening = true;
+    try {
+      await _openNotificationInner(notification);
+    } finally {
+      _isOpening = false;
+    }
+  }
+
+  Future<void> _openNotificationInner(Map<String, dynamic> notification) async {
+    late final String customerId;
+    try {
+      customerId = await CustomerIdentityService(client: _client).getCustomerId();
+    } catch (error) {
+      debugPrint('Could not resolve customer for notification: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not open this notification right now.')));
+      return;
+    }
 
     final id = notification['id']?.toString() ?? '';
     if (notification['is_read'] != true && id.isNotEmpty) {
@@ -76,7 +105,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (!mounted) return;
 
     if ((type == 'trainer_match' || type == 'match_ready') && requestId.isNotEmpty) {
-      context.push(GSWRoutes.matchedTrainer, extra: requestId);
+      await context.push(GSWRoutes.matchedTrainer, extra: requestId);
+      return;
+    }
+
+    if (type == 'new_trainer') {
+      context.go(GSWRoutes.browseTrainers);
       return;
     }
 
@@ -138,7 +172,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     if (!mounted) return;
     if (sessionId != null && sessionId.isNotEmpty) {
-      context.push(
+      await context.push(
         GSWRoutes.sessionDetails,
         extra: type == 'session_feedback'
             ? {'sessionId': sessionId, 'openFeedback': true}
@@ -147,7 +181,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } else {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Session details are unavailable.')));
+      ).showSnackBar(const SnackBar(content: Text('This session is no longer available.')));
     }
   }
 
@@ -186,8 +220,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         _buildBackButton(),
                         const SizedBox(height: 24),
                         Text(
-                          'NOTIFICATIONS',
-                          style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+                          'Notifications',
+                          style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
                         ),
                         const SizedBox(height: 24),
                         if (notifications.isEmpty)
@@ -232,15 +266,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   List<Widget> _buildNotificationSections(List<Map<String, dynamic>> notifications) {
     // Unread notifications are shown once, in Latest, regardless of age.
-    // Previously read notifications are grouped by local calendar day.
+    // Previously read notifications are grouped by Dubai calendar day.
     final latest = <Map<String, dynamic>>[];
     final today = <Map<String, dynamic>>[];
     final yesterday = <Map<String, dynamic>>[];
     final earlier = <Map<String, dynamic>>[];
 
-    final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
-    final yesterdayStart = todayStart.subtract(const Duration(days: 1));
+    final now = GSWTime.nowDubai();
+    final yesterdayDubai = now.subtract(const Duration(days: 1));
 
     for (final notification in notifications) {
       if (notification['is_read'] != true) {
@@ -248,17 +281,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         continue;
       }
 
-      final createdAt = DateTime.tryParse(notification['created_at']?.toString() ?? '');
+      final createdAt = GSWTime.parseToDubai(notification['created_at']);
       if (createdAt == null) {
         earlier.add(notification);
         continue;
       }
 
-      final local = createdAt.toLocal();
-      final day = DateTime(local.year, local.month, local.day);
-      if (day == todayStart) {
+      if (GSWTime.isSameDay(createdAt, now)) {
         today.add(notification);
-      } else if (day == yesterdayStart) {
+      } else if (GSWTime.isSameDay(createdAt, yesterdayDubai)) {
         yesterday.add(notification);
       } else {
         earlier.add(notification);
@@ -295,7 +326,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final title = notification['title']?.toString().trim() ?? '';
     final description = notification['body']?.toString().trim() ?? '';
     final isRead = notification['is_read'] == true;
-    final createdAt = DateTime.tryParse(notification['created_at']?.toString() ?? '');
+    final createdAt = GSWTime.parseToDubai(notification['created_at']);
     return _NotificationCard(
       title: title,
       description: description,
@@ -307,26 +338,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  String _relativeTime(DateTime? value) {
-    if (value == null) {
-      return '';
-    }
-    final difference = DateTime.now().difference(value.toLocal());
-    if (difference.inMinutes < 1) {
-      return 'Now';
-    }
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    }
-    if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    }
-    if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    }
-    return '${value.toLocal().day}/'
-        '${value.toLocal().month}';
-  }
+  /// Dubai time, 12-hour clock: "5 min ago", "3 hours ago", "Yesterday".
+  String _relativeTime(DateTime? dubai) => dubai == null ? '' : GSWTime.ago(dubai);
 
   Widget _buildEmptyState() {
     return Padding(
@@ -360,17 +373,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             _buildBackButton(),
             const SizedBox(height: 24),
             Text(
-              'NOTIFICATIONS',
-              style: GSWTextStyles.displaySmall.copyWith(color: GSWColors.textPrimary),
+              'Notifications',
+              style: GSWTextStyles.titleLarge.copyWith(color: GSWColors.textPrimary),
             ),
             const SizedBox(height: 48),
             Center(
               child: Text(
-                'Unable to load notifications right now.',
+                'We couldn’t load your notifications.',
                 textAlign: TextAlign.center,
                 style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
               ),
             ),
+            const SizedBox(height: 20),
+            GSWButton(label: 'Try again', variant: GSWButtonVariant.secondary, onPressed: _refresh),
           ],
         ),
       ),
@@ -398,16 +413,16 @@ class _NotificationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(GSWRadius.card),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
         child: Ink(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           decoration: BoxDecoration(
             color: GSWColors.surfacePrimary,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(GSWRadius.card),
             border: highlighted ? Border.all(color: GSWColors.primary, width: 1) : null,
           ),
           child: Row(

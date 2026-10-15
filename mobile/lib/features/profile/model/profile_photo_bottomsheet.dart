@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
+import 'package:mobile/core/widgets/sheets/gsw_sheet_drag_dismiss.dart';
 import 'package:mobile/core/widgets/buttons/gsw_button.dart';
 
-import '../../../../core/theme/gsw_colors.dart';
-import '../../../../core/theme/gsw_typography.dart';
+import 'package:mobile/core/theme/gsw_colors.dart';
+import 'package:mobile/core/theme/gsw_typography.dart';
 
+/// 12.2b Profile photo options (Figma 1046:3337). Bottom sheet per the shared
+/// sheet spec: 28px grabber zone, 16px sides, 28px bottom, 20px gap.
 class ProfilePhotoSheet extends StatelessWidget {
   const ProfilePhotoSheet({
     super.key,
@@ -31,85 +34,92 @@ class ProfilePhotoSheet extends StatelessWidget {
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: 0.72),
-      builder: (context) {
+      barrierColor: GSWColors.scrim,
+      enableDrag: false,
+      builder: (_) => GSWSheetDragDismiss(
+        child: Builder(builder: (context) {
         return ProfilePhotoSheet(
           onTakePhoto: onTakePhoto,
           onChooseFromLibrary: onChooseFromLibrary,
           onRemovePhoto: onRemovePhoto,
           hasPhoto: hasPhoto,
         );
-      },
+      }),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
     return Container(
+      width: double.infinity,
       decoration: const BoxDecoration(
         color: GSWColors.backgroundPrimary,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(GSWRadius.sheet)),
       ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 28 + bottomInset),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 28,
+              child: Center(
                 child: Container(
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: GSWColors.borderSecondary,
-                    borderRadius: BorderRadius.circular(999),
+                    color: GSWColors.surfaceInteractive,
+                    borderRadius: BorderRadius.circular(GSWRadius.full),
                   ),
                 ),
               ),
+            ),
 
-              const SizedBox(height: 28),
+            Text(
+              'Profile photo',
+              style: GSWTextStyles.titleLarge.copyWith(height: 1, color: GSWColors.textPrimary),
+            ),
 
-              Text(
-                'Profile photo',
-                style: GSWTextStyles.titleExtraLarge.copyWith(color: GSWColors.textPrimary),
+            const SizedBox(height: 8),
+
+            Text(
+              'Use a clear photo of your face, on its own. Only your trainer and GetSetWell see it.',
+              style: GSWTextStyles.bodyMedium.copyWith(
+                height: 20 / 14,
+                color: GSWColors.textSecondary,
               ),
+            ),
 
-              const SizedBox(height: 8),
+            const SizedBox(height: 20),
 
-              Text(
-                'Use a clear photo of your face, on its own. Only your trainer and GetSetWell see it.',
-                style: GSWTextStyles.bodyMedium.copyWith(color: GSWColors.textSecondary),
-              ),
+            _ActionCard(
+              hasPhoto: hasPhoto,
+              onTakePhoto: () {
+                Navigator.of(context).pop();
+                onTakePhoto();
+              },
+              onChooseFromLibrary: () {
+                Navigator.of(context).pop();
+                onChooseFromLibrary();
+              },
+              onRemovePhoto: () {
+                Navigator.of(context).pop();
+                onRemovePhoto();
+              },
+            ),
 
-              const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-              _ActionCard(
-                hasPhoto: hasPhoto,
-                onTakePhoto: () {
-                  Navigator.of(context).pop();
-                  onTakePhoto();
-                },
-                onChooseFromLibrary: () {
-                  Navigator.of(context).pop();
-                  onChooseFromLibrary();
-                },
-                onRemovePhoto: () {
-                  Navigator.of(context).pop();
-                  onRemovePhoto();
-                },
-              ),
-
-              const SizedBox(height: 20),
-
-              GSWButton(
-                label: 'Cancel',
-                variant: GSWButtonVariant.tertiary,
-                onPressed: context.pop,
-              ),
-            ],
-          ),
+            GSWButton(
+              label: 'Cancel',
+              variant: GSWButtonVariant.tertiary,
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ],
         ),
       ),
     );
@@ -135,8 +145,8 @@ class _ActionCard extends StatelessWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         color: GSWColors.backgroundPrimary,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: GSWColors.borderSecondary),
+        borderRadius: BorderRadius.circular(GSWRadius.card),
+        border: Border.all(color: GSWColors.surfaceInteractive),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -166,7 +176,7 @@ class _ActionCard extends StatelessWidget {
   }
 
   Widget _divider() {
-    return Divider(height: 1, thickness: 1, color: GSWColors.borderSecondary);
+    return const Divider(height: 1, thickness: 1, color: GSWColors.surfaceInteractive);
   }
 }
 
@@ -199,25 +209,37 @@ class _PhotoActionRow extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: enabled ? onTap : null,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-          child: SizedBox(
-            width: double.infinity,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: GSWTextStyles.bodyLarge.copyWith(
-                    color: titleColor,
-                    fontWeight: FontWeight.w600,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: SizedBox(
+              width: double.infinity,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    style: GSWTextStyles.bodyLarge.copyWith(
+                      height: 22 / 16,
+                      fontWeight: FontWeight.w600,
+                      color: titleColor,
+                    ),
                   ),
-                ),
 
-                const SizedBox(height: 6),
+                  const SizedBox(height: 2),
 
-                Text(subtitle, style: GSWTextStyles.bodySmall.copyWith(color: subtitleColor)),
-              ],
+                  Text(
+                    subtitle,
+                    style: GSWTextStyles.bodyMedium.copyWith(
+                      fontSize: 13,
+                      height: 18 / 13,
+                      color: subtitleColor,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

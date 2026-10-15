@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:mobile/core/theme/gsw_radius.dart';
 
 class GSWDashedBorder extends StatelessWidget {
   const GSWDashedBorder({
     super.key,
     required this.child,
     required this.color,
-    this.radius = 20,
+    this.radius = GSWRadius.card,
     this.strokeWidth = 1,
     this.dashWidth = 4,
     this.dashGap = 4,
